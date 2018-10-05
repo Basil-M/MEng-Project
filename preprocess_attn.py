@@ -6,7 +6,7 @@ from molecules.utils import one_hot_array, one_hot_index
 
 from sklearn.model_selection import train_test_split
 
-MAX_NUM_ROWS = 100000
+MAX_NUM_ROWS = 1000
 SMILES_COL_NAME = 'structure'
 INFILE='data/zinc12.h5'
 OUTFILE='data/processed.txt'

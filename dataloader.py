@@ -1,8 +1,73 @@
 import os, sys, time, random
+
+from typing import Dict, Any, Union
+
 import ljqpy
 import h5py
 import numpy as np
 import time
+import csv
+import pickle
+
+class attn_params:
+    _params = None
+
+    def __init__(self):
+        self._params = {
+            "current_epoch": 1,
+            "epochs":20,
+            "batch_size":64,
+            "len_limit":120,
+            "d_model": 512,
+            "d_inner_hid": 512,
+            "n_head": 8,
+            "d_k": 64,
+            "d_v": 64,
+            "layers": 3,
+            "dropout": 0.1,
+            "d_h": 128,
+            "share_word_emb": True
+        }
+
+    def get(self, param):
+        if param in self._params:
+            return self._params[param]
+        else:
+            raise Warning("Param {} unrecognised".format(param))
+
+    def set(self, param, value):
+        if not value is None:
+            if param in self._params:
+                self._params[param] = value
+            else:
+                print("Param {} unrecognised".format(param))
+
+    def load(self, fn):
+        with open(fn, mode= 'rb') as f:
+            self._params = pickle.load(f)
+
+
+    def save(self, fn):
+        with open(fn, mode='wb') as f:
+            pickle.dump(self._params, f, pickle.HIGHEST_PROTOCOL)
+
+    def dump(self):
+        # get max length
+        m_len = max([len(key) for key in self._params])
+
+        for key, value in self._params.iteritems():
+            print("\t{}  {}".format(key.ljust(m_len), value))
+
+    def equals(self, other_params):
+        for key, value  in self._params.iteritems():
+            if other_params._params[key] != value and key != "current_epoch":
+                return False
+        return True
+
+    @property
+    def params(self):
+        return self._params
+
 
 class TokenList:
     def __init__(self, token_list):
