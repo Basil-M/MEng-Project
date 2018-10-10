@@ -8,14 +8,19 @@ import numpy as np
 import time
 import csv
 import pickle
+from rdkit import Chem
+from rdkit.Chem import QED
 
 class attn_params:
     _params = None
 
     def __init__(self):
+        self._training_params = ["current_epoch", "ae_trained"]
         self._params = {
+            "d_file": None,
             "current_epoch": 1,
             "epochs":20,
+            "ae_trained": False,
             "batch_size":64,
             "len_limit":120,
             "d_model": 512,
@@ -25,8 +30,10 @@ class attn_params:
             "d_v": 64,
             "layers": 3,
             "dropout": 0.1,
-            "d_h": 128,
-            "share_word_emb": True
+            "latent_dim": 128,
+            "epsilon":0.01,
+            "pp_epochs":15,
+            "pp_layers":3
         }
 
     def get(self, param):
@@ -60,7 +67,7 @@ class attn_params:
 
     def equals(self, other_params):
         for key, value  in self._params.iteritems():
-            if other_params._params[key] != value and key != "current_epoch":
+            if other_params._params[key] != value and not key in self._training_params:
                 return False
         return True
 
@@ -109,44 +116,51 @@ def MakeSmilesDict(fn=None, min_freq=5, dict_file=None):
 
     return TokenList(lst)
 
-def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0.8):
+def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0.8, properties=["QED"]):
     if h5_file is not None and os.path.exists(h5_file):
         print('Loading data from {}'.format(h5_file))
 
         with h5py.File(h5_file) as dfile:
             test_data, train_data = dfile['test'][:], dfile['train'][:]
+            test_pps, train_pps = dfile['test_props'][:], dfile['train_props'][:]
     else:
         print("Processing data from {}".format(fn))
         data = ljqpy.LoadCSVg(fn)
 
         Xs = []
 
+        Ps = []
+
         # Get structures
         for seq in data:
+            Ps.append(QED(Chem.MolFromSmiles(seq[0])))
             Xs.append(list(seq))
 
         # Randomise
-        random.shuffle(Xs)
+        # ind = np.array(range(0,len(Xs)))
+        # random.shuffle(ind)
 
         # Split testing and training data
         # TODO(Basil): Fix ugly hack with the length of Xs...
         split_pos = int(np.floor(train_frac*np.max(np.shape(Xs))))
-        print("Xs shape: {} \nSplit pos: {}".format(np.shape(Xs), split_pos))
 
+        # train_data = pad_smiles(Xs[ind[:split_pos]], tokens, max_len)
+        # train_pps = Ps[ind[:split_pos]]
+        # test_data = pad_smiles(Xs[ind[split_pos:]], tokens, max_len)
+        # test_pps = Ps[ind[:split_pos]]
         train_data = pad_smiles(Xs[:split_pos], tokens, max_len)
-
+        train_pps = Ps[:split_pos]
         test_data = pad_smiles(Xs[split_pos:], tokens, max_len)
-
-        print("Train_data shape: {}\nTest_data shape:{}".format(np.shape(train_data), np.shape(test_data)))
-        #
-        # for d in train_data:
-        #     print(d)
+        test_pps = Ps[split_pos:]
 
         if h5_file is not None:
             with h5py.File(h5_file, 'w') as dfile:
                 dfile.create_dataset('test', data=test_data)
                 dfile.create_dataset('train', data=train_data)
-    return train_data, test_data
+                dfile.create_dataset('test_props', data=test_pps)
+                dfile.create_dataset('train_props', data=train_pps)
+
+    return train_data, test_data, train_pps, test_pps
 
 def pad_smiles(xs, tokens, max_len=999):
     longest = np.max([len(x[0]) for x in xs])

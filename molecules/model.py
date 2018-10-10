@@ -100,123 +100,9 @@ class MoleculeVAE():
         self.create(charset, weights_file=weights_file, latent_rep_size=latent_rep_size)
 
 
-class MoleculeTransformer():
-    autoencoder = None
-    encoder = None
-    decoder = None
-
-    def create(self,
-               tokens,
-               params,
-               weights_file=None):
-        # Get vocabulary size
-        charset_length = tokens.num()
-
-        # Get some key params
-        d_model = params.get("d_model")
-        latent_rep_size = params.get("d_h")
-        max_length = params.get("len_limit")
-
-        # Set up word embedding layer
-        # Assume encoder & decoder use same word embeddings
-        word_emb = tr.Embedding(charset_length, d_model)
-
-        # Placeholder for input
-        src_seq_input = Input(shape=(None,), dtype='int32', name='encoder_input')
-
-        src_seq = src_seq_input
-        tgt_seq = Lambda(lambda x: x[:, :-1], name='decoded_thus_far')(src_seq_input)
-
-        # Positional embedding
-        src_pos = Lambda(self.get_pos_seq)(src_seq)
-        tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
-
-        # Create embedding layers
-        pos_emb = tr.Embedding(max_length, d_model, trainable=False,
-                               weights=[tr.GetPosEncodingMatrix(max_length, d_model)])
-
-        #
-        # _, z = tr._buildEncoder(x=x,
-        #                         src_pos=src_pos,
-        #                         params=params,
-        #                         word_emb=word_emb,
-        #                         pos_emb=pos_emb)
-        #
-        # self.encoder = Model(x, z)
-        #
-        # encoded_input = Input(shape=(latent_rep_size,))
-        # decoded_output = tr._buildDecoder(
-        #         z=encoded_input,
-        #         tgt_seq=tgt_seq,
-        #         tgt_pos=tgt_pos,
-        #         dec_so_far=x,
-        #         params=params,
-        #         charset_length=charset_length,
-        #         word_emb=word_emb, pos_emb=pos_emb
-        #     )
-        # # self.decoder = Model(encoded_input, decoded_output)
-
-        # src_seq_input = Input(shape=(None,), dtype='int32', name='autoencoder_input')
-        enc_output, z_mean, z_log_var = tr._buildEncoder(x=src_seq_input,
-                                                         src_pos=src_pos,
-                                                         params=params,
-                                                         word_emb=word_emb,
-                                                         pos_emb=pos_emb)
-        dec_output = tr._buildDecoder(
-            z=enc_output,
-            tgt_seq=Lambda(lambda x: x[:, :-1])(src_seq_input),
-            tgt_pos=Lambda(self.get_pos_seq)(src_seq_input),
-            dec_so_far=src_seq_input,
-            params=params,
-            charset_length=charset_length,
-            word_emb=word_emb, pos_emb=pos_emb
-        )
-
-        tgt_true = Lambda(lambda x: x[:, 1:])(src_seq_input)
-
-        # VAE Loss function
-        def vae_loss(args):
-            y_pred, y_true = args
-            y_true = tf.cast(y_true, 'int32')
-            xent_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_pred, logits=y_true)
-            kl_loss = - 0.5 * K.mean(1 + z_log_var - K.square(z_mean) - K.exp(z_log_var), axis=-1)
-            return xent_loss + kl_loss
-
-        loss = Lambda(vae_loss)([dec_output, tgt_true])
-
-        self.autoencoder = Model(
-            src_seq_input,
-            loss
-        )
-        self.autoencoder.add_loss(loss)
-
-        if weights_file:
-            self.autoencoder.load_weights(weights_file)
-            self.encoder.load_weights(weights_file, by_name=True)
-            # self.decoder.load_weights(weights_file, by_name=True)
-
-        self.autoencoder.compile(optimizer='Adam')
-
-    def get_pos_seq(self, x):
-        mask = K.cast(K.not_equal(x, 0), 'int32')
-        pos = K.cumsum(K.ones_like(x, 'int32'), 1)
-        return pos * mask
-
-    def save(self, filename):
-        self.autoencoder.save_weights(filename)
-
-    def load(self, charset, weights_file, params_file):
-        params = attn_params()
-        params.load(params_file)
-        self.create(charset, weights_file=weights_file, params=params)
-
-
 # https://github.com/Lsdefine/attention-is-all-you-need-keras
 class Transformer:
     def __init__(self, i_tokens, p, o_tokens=None):
-        print("Initialising attention model with the following parameters:")
-        p.dump()
-
         self.i_tokens = i_tokens
 
         if o_tokens is None:
@@ -228,6 +114,8 @@ class Transformer:
         self.src_loc_info = True
         self.d_model = p.get("d_model")
         self.decode_model = None
+        self.latent_dim = p.get("latent_dim")
+        self.pp_layers = p.get("pp_layers")
         d_emb = self.d_model
 
         pos_emb = tr.Embedding(self.len_limit, d_emb, trainable=False,
@@ -235,18 +123,13 @@ class Transformer:
 
         i_word_emb = tr.Embedding(i_tokens.num(), d_emb)
         o_word_emb = i_word_emb
-        # if p.get("share_word_emb"):
-        #     assert i_tokens.num() == o_tokens.num()
-        #     o_word_emb = i_word_emb
-        # else:
-        #     o_word_emb = tr.Embedding(o_tokens.num(), d_emb)
 
         self.encoder = tr.Encoder(self.d_model, p.get("d_inner_hid"), p.get("n_head"), p.get("d_k"), p.get("d_v"),
                                   p.get("layers"), p.get("dropout"),
-                                  d_h=p.get("d_h"), word_emb=i_word_emb, pos_emb=pos_emb)
+                                  latent_dim=p.get("latent_dim"), word_emb=i_word_emb, pos_emb=pos_emb)
         self.decoder = tr.Decoder(self.d_model, p.get("d_inner_hid"), p.get("n_head"), p.get("d_k"), p.get("d_v"),
                                   p.get("layers"), p.get("dropout"),
-                                  d_h=p.get("d_h"), word_emb=o_word_emb, pos_emb=pos_emb)
+                                  latent_dim=p.get("latent_dim"), word_emb=o_word_emb, pos_emb=pos_emb)
         self.target_layer = TimeDistributed(Dense(o_tokens.num(), use_bias=False))
 
     def get_pos_seq(self, x):
@@ -269,6 +152,13 @@ class Transformer:
         enc_output, kl_loss, z_mean, z_log_var = self.encoder(src_seq, src_pos, active_layers=active_layers)
         dec_output = self.decoder(tgt_seq, tgt_pos, src_seq, enc_output, active_layers=active_layers)
         final_output = self.target_layer(dec_output)
+
+        # Property prediction
+        encoded_input = Input(shape=(None, self.latent_dim), dtype='float', name='latent_rep')
+        h = Dense(self.latent_dim, activation='linear')(encoded_input)
+        for _ in range(self.pp_layers - 1):
+            h = Dense(self.latent_dim, activation='linear')(h)
+        prop_output = Dense(1, activation='linear')(h)
 
         def get_loss(args):
             y_pred, y_true = args
@@ -293,7 +183,15 @@ class Transformer:
 
         self.autoencoder = Model([src_seq_input, tgt_seq_input], loss)
         self.autoencoder.add_loss([loss])
+
+        # For property prediction
+        self.property_predictor = Model(encoded_input, prop_output)
+
+        # For outputting next symbol
         self.output_model = Model([src_seq_input, tgt_seq_input], final_output)
+
+        # For encoding to z
+        self.output_latent = Model([src_seq_input, tgt_seq_input], enc_output)
 
         self.autoencoder.compile(optimizer, None)
         self.autoencoder.metrics_names.append('ppl')

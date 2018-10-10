@@ -193,15 +193,15 @@ def GetSubMask(s):
 
 class Encoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
-                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, d_h = None, stddev=0.01):
+                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, latent_dim = None, stddev=0.01):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
         self.layers = [EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
 
-        if d_h is None:
-            self.d_h = d_model
+        if latent_dim is None:
+            self.latent_dim = d_model
         else:
-            self.d_h = d_h
+            self.latent_dim = latent_dim
 
         self.stddev = stddev
 
@@ -217,151 +217,45 @@ class Encoder():
             h, att = enc_layer(h, mask)
             if return_att: atts.append(att)
 
-
-        # Sampling function
-        def sampling(args):
-            z_mean_, z_log_var_ = args
-
-            batch_size = K.shape(z_mean_)[0]
-            seq_length = K.shape(z_mean_)[1]
-            epsilon = K.random_normal(shape=(batch_size,seq_length, self.d_h), mean=0., stddev=self.stddev)
-            # z_mean_ = tf.Print(z_mean_, [tf.shape(z_mean_)])
-            # epsilon = tf.Print(epsilon, [tf.shape(epsilon)])
-
-            return z_mean_ + K.exp(z_log_var_ / 2) * epsilon
-
-
         # Set up bottleneck
 
-        z_mean = Dense(self.d_h, name='z_mean', activation='linear')(h)
-        z_log_var = Dense(self.d_h, name='z_log_var', activation='linear')(h)
-        z_samp = Lambda(sampling, name='lambda')([z_mean, z_log_var])
-        # kl_loss = 0
-        kl_loss = - 0.5 * K.mean(1 + z_log_var - K.square(z_mean) - K.exp(z_log_var), axis=-1)
-        # kl_loss = tf.Print(kl_loss,[kl_loss])
-        # kl_loss = tf.reduce_sum(kl_loss, -1)
+
+
+        if self.stddev is None:
+            # Model isn't probabilistic
+            z_mean = Dense(self.latent_dim, name='z_mean', activation='linear')(h)
+            z_log_var = None
+            kl_loss = 0
+            z_samp = z_mean
+        else:
+            # Include variational component
+            # Sampling function
+            def sampling(args):
+                z_mean_, z_log_var_ = args
+                batch_size = K.shape(z_mean_)[0]
+                seq_length = K.shape(z_mean_)[1]
+                epsilon = K.random_normal(shape=(batch_size, seq_length, self.latent_dim), mean=0., stddev=self.stddev)
+                # z_mean_ = tf.Print(z_mean_, [tf.shape(z_mean_)])
+                # epsilon = tf.Print(epsilon, [tf.shape(epsilon)])
+
+                return z_mean_ + K.exp(z_log_var_ / 2) * epsilon
+
+            z_mean = Dense(self.latent_dim, name='z_mean', activation='linear')(h)
+            z_log_var = Dense(self.latent_dim, name='z_log_var', activation='linear')(h)
+            z_samp = Lambda(sampling, name='lambda')([z_mean, z_log_var])
+            kl_loss = - 0.5 * K.mean(1 + z_log_var - K.square(z_mean) - K.exp(z_log_var), axis=-1)
+
 
         return (z_samp, kl_loss, z_mean, z_log_var, atts) if return_att else (z_samp, kl_loss, z_mean, z_log_var)
 
-def _buildEncoder(x, src_pos, params,
-                  word_emb=None, pos_emb=None,
-                  return_att = False, active_layers = 999):
-    # Get relevant parameters
-    d_model = params.get("d_model")
-    d_h = params.get("d_h")
-    d_inner_hid = params.get("d_inner_hid")
-    n_head = params.get("n_head")
-    d_k = params.get("d_k")
-    d_v = params.get("d_v")
-    max_length = params.get("len_limit")
-    layers = params.get("layers")
-    dropout = params.get("dropout")
-    epsilon_std = params.get("epsilon")
-
-    # Word embedding of source sequence
-    h = word_emb(x)
-
-    # Positional embedding
-    if pos_emb is not None:
-        pos = pos_emb(src_pos)
-        h = Add()([h, pos])
-
-    # Set up list for returning attentions
-    if return_att:
-        atts = []
-
-    # Set up encoder layers
-    layers = [EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
-
-    mask = Lambda(lambda x: GetPadMask(x, x))(x)
-    for enc_layer in layers[:active_layers]:
-        h, att = enc_layer(h, mask)
-        if return_att:
-            atts.append(att)
-
-    if d_h is None:
-        # This means there is no bottle neck
-        # But still set up two dense layers which will find z_mean and z_log_var
-        d_h = d_model
-
-    # Sampling function
-    def sampling(args):
-        z_mean_, z_log_var_ = args
-        batch_size = K.shape(z_mean_)[0]
-        epsilon = K.random_normal(shape=(batch_size, d_h), mean=0., stddev=epsilon_std)
-        return z_mean_ + K.exp(z_log_var_ / 2) * epsilon
-
-    # Set up bottleneck
-    z_mean = Dense(d_h, name='z_mean', activation='linear')(h)
-    z_log_var = Dense(d_h, name='z_log_var', activation='linear')(h)
-
-    # # VAE Loss function
-    # def vae_loss(x, x_decoded_mean):
-    #     x = K.flatten(x)
-    #     x_decoded_mean = K.flatten(x_decoded_mean)
-    #
-    #     xent_loss = max_length * binary_crossentropy(x, x_decoded_mean)
-    #     kl_loss = - 0.5 * K.mean(1 + z_log_var - K.square(z_mean) - K.exp(z_log_var), axis=-1)
-    #     return xent_loss + kl_loss
-
-    # return vae_loss, Lambda(sampling, output_shape=(d_h,), name='lambda')([z_mean, z_log_var])
-    z_samp = Lambda(sampling, output_shape=(d_h,), name='lambda')([z_mean, z_log_var])
-
-    return z_samp, z_mean, z_log_var
-def _buildDecoder(z, tgt_seq, tgt_pos, dec_so_far,
-                  params, charset_length,
-                  word_emb=None, pos_emb=None,
-                  return_att=False, active_layers=999):
-    # Get relevant parameters
-    d_model = params.get("d_model")
-    d_inner_hid = params.get("d_inner_hid")
-    n_head = params.get("n_head")
-    d_k = params.get("d_k")
-    d_v = params.get("d_v")
-    layers = params.get("layers")
-    dropout = params.get("dropout")
-
-    # Word embedding of sequence decoded thus far
-    h = word_emb(tgt_seq)
-
-    #Add to positional embedding
-    if pos_emb is not None:
-        pos = pos_emb(tgt_pos)
-        h = Add()([h, pos])
-
-
-    #Set up self padding mask so it doesn't look in the future
-    self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(tgt_seq)
-    self_sub_mask = Lambda(GetSubMask)(tgt_seq)
-    self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
-    enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([tgt_seq, dec_so_far])
-
-
-    # Set up list for returning attentions
-    if return_att:
-        self_atts, enc_atts = [], []
-
-    # Set up decoder layers
-    layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
-
-    for dec_layer in layers[:active_layers]:
-        h, self_att, enc_att = dec_layer(h, z, self_mask, enc_mask)
-        if return_att:
-            self_atts.append(self_att)
-            enc_atts.append(enc_att)
-
-    # Dense layer to vocabulary size for probability of next decoded symbol
-    decoded_mean = TimeDistributed(Dense(charset_length, activation='softmax'), name='decoded_mean')(h)
-    return (decoded_mean, self_atts, enc_atts) if return_att else decoded_mean
-
 class Decoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
-                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, d_h = None):
+                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, latent_dim = None):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
-        if not d_h is None:
-            self.bridge = Dense(d_model, input_shape=(d_h, ))
+        if not latent_dim is None:
+            self.bridge = Dense(d_model, input_shape=(latent_dim, ))
         else:
             self.bridge = None
 
@@ -388,6 +282,7 @@ class Decoder():
                 enc_atts.append(enc_att)
 
         return (x, self_atts, enc_atts) if return_att else x
+
 
 class LRSchedulerPerStep(Callback):
     def __init__(self, d_model, warmup=4000):
