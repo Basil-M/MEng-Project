@@ -1,21 +1,11 @@
-# A Keras implementation of Aspuru-Guzik's molecular autoencoder paper
+# Attention is All You Need (to propose novel chemical designs)
+This work aims to adapt [Google's solely attention-based architecture](https://arxiv.org/abs/1706.03762) to a variational auto-encoder, with the end goal of novel chemical generation. Please note this is a **work in progress**.
 
-<table style="border-collapse: collapse">
-<tr>
-<td style="vertical-align: top" valign="top">
-    <strong>Abstract from the paper</strong>
-    <p>We report a method to convert discrete representations of molecules to and from a multidimensional continuous representation. This generative model allows efficient search and optimization through open-ended spaces of chemical compounds.</p>
-    <p>We train deep neural networks on hundreds of thousands of existing chemical structures to construct two coupled functions: an encoder and a decoder. The encoder converts the discrete representation of a molecule into a real-valued continuous vector, and the decoder converts these continuous vectors back to the discrete representation from this latent space.</p>
-    <p>Continuous representations allow us to automatically generate novel chemical structures by performing simple operations in the latent space, such as decoding random vectors, perturbing known chemical structures, or interpolating between molecules. Continuous representations also allow the use of powerful gradient-based optimization to efficiently guide the search for optimized functional compounds. We demonstrate our method in the design of drug-like molecules as well as organic light-emitting diodes.</p>
-    <p>
-        <strong>Link to the paper</strong><br />
-        <a href="https://arxiv.org/abs/1610.02415">arXiv</a>
-    </p>
-</td><td width="300">
-<img src="images/network.png" width="300" /></img>
-</td>
-</tr>
-</table>
+## Previous work
+As mentioned, it is primarily based on Google's transformer architecture. It builds upon [preceding work](https://arxiv.org/abs/1610.02415) by Aspuru-Guzik et al; by using a string representation of molecules, they were able to leverage an NLP approach to convert the discrete representation of molecules to a continuous latent representation. A property predictor is trained on this latent representation. A continuous latent representation allows for efficient search and optimisation techniques, opening avenues for numerous methods for generating novel chemical structures.
+
+## Credits
+This work builds on (Max Hodak's implementation)[https://github.com/maxhodak/keras-molecules] and (Lsdefine's implementation)[https://github.com/Lsdefine/attention-is-all-you-need-keras] of the Transformer architecture.
 
 ## Requirements
 
@@ -79,8 +69,3 @@ python sample.py target/encoded.h5 model.h5 --target decoder
 
 ## Performance
 
-After 30 epochs on a 500,000 molecule extract from ChEMBL 21 (~7 hours on a NVIDIA GTX 1080), I'm seeing a loss of 0.26 and a reconstruction accuracy of 0.98.
-
-Projecting the dataset onto 2D latent space gives a figure that looks pretty reasonably like Figure 3 from the paper, though there are some strange striations and it's not quite as well spread out as the examples in the paper.
-
-<img src="images/latent_2d.png" />
