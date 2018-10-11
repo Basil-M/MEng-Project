@@ -5,7 +5,7 @@ This work aims to adapt [Google's solely attention-based architecture](https://a
 As mentioned, it is primarily based on Google's transformer architecture. It builds upon [preceding work](https://arxiv.org/abs/1610.02415) by Aspuru-Guzik et al; by using a string representation of molecules, they were able to leverage an NLP approach to convert the discrete representation of molecules to a continuous latent representation. A property predictor is trained on this latent representation. A continuous latent representation allows for efficient search and optimisation techniques, opening avenues for numerous methods for generating novel chemical structures.
 
 ## Credits
-This work builds on (Max Hodak's implementation)[https://github.com/maxhodak/keras-molecules] and (Lsdefine's implementation)[https://github.com/Lsdefine/attention-is-all-you-need-keras] of the Transformer architecture.
+This work builds on [Max Hodak's implementation](https://github.com/maxhodak/keras-molecules) and [Lsdefine's implementation](https://github.com/Lsdefine/attention-is-all-you-need-keras) of the Transformer architecture.
 
 ## Requirements
 
