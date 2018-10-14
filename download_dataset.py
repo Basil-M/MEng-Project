@@ -1,6 +1,9 @@
-import os
+import os, sys
 import argparse
-import urllib
+if sys.version_info >= (3,0):
+    from urllib.request import urlretrieve
+else:
+    from urllib import urlretrieve
 import pandas
 import tempfile
 from progressbar import ProgressBar, Percentage, Bar, ETA, FileTransferSpeed
@@ -16,11 +19,12 @@ DEFAULTS = {
     }
 }
 
+
 def get_arguments():
-    parser = argparse.ArgumentParser(description = 'Download ChEMBL entries and convert them to input for preprocessing')
-    parser.add_argument('--dataset', type = str, help = "%s  ...or specify your own --uri" % ", ".join(DEFAULTS.keys()))
-    parser.add_argument('--uri', type = str, help = 'URI to download ChEMBL entries from')
-    parser.add_argument('--outfile', type = str, help = 'Output file name')
+    parser = argparse.ArgumentParser(description='Download ChEMBL entries and convert them to input for preprocessing')
+    parser.add_argument('--dataset', type=str, help="%s  ...or specify your own --uri" % ", ".join(DEFAULTS.keys()))
+    parser.add_argument('--uri', type=str, help='URI to download ChEMBL entries from')
+    parser.add_argument('--outfile', type=str, help='Output file name')
     args = parser.parse_args()
 
     if args.dataset and args.dataset in DEFAULTS.keys():
@@ -40,9 +44,10 @@ def get_arguments():
     dataset = args.dataset
     return (uri, outfile, dataset)
 
+
 def main():
     uri, outfile, dataset = get_arguments()
-    fd = tempfile.NamedTemporaryFile()
+    fd = tempfile.NamedTemporaryFile(dir='data/')
     progress = ProgressBar(widgets=[Percentage(), ' ', Bar(), ' ', ETA(), ' ', FileTransferSpeed()])
 
     def update(count, blockSize, totalSize):
@@ -51,19 +56,20 @@ def main():
             progress.start()
         progress.update(min(count * blockSize, totalSize))
 
-    urllib.urlretrieve(uri, fd.name, reporthook = update)
+    urlretrieve(uri, fd.name, reporthook=update)
     if dataset == 'zinc12':
-        df = pandas.read_csv(fd.name, delimiter = '\t')
-        df = df.rename(columns={'SMILES':'structure'})
-        df.to_hdf(outfile, 'table', format = 'table', data_columns = True)
+        df = pandas.read_csv(fd.name, delimiter='\t')
+        df = df.rename(columns={'SMILES': 'structure'})
+        df.to_hdf(outfile, 'table', format='table', data_columns=True)
     elif dataset == 'chembl22':
-        df = pandas.read_table(fd.name,compression='gzip')
-        df = df.rename(columns={'canonical_smiles':'structure'})
-        df.to_hdf(outfile, 'table', format = 'table', data_columns = True)
+        df = pandas.read_table(fd.name, compression='gzip')
+        df = df.rename(columns={'canonical_smiles': 'structure'})
+        df.to_hdf(outfile, 'table', format='table', data_columns=True)
         pass
     else:
-        df = pandas.read_csv(fd.name, delimiter = '\t')
-        df.to_hdf(outfile, 'table', format = 'table', data_columns = True)
+        df = pandas.read_csv(fd.name, delimiter='\t')
+        df.to_hdf(outfile, 'table', format='table', data_columns=True)
+
 
 if __name__ == '__main__':
     main()
