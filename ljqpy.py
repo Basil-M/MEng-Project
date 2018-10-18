@@ -1,7 +1,10 @@
 # coding = utf-8
 
-import os, re, sys, random, urlparse
-
+import os, re, sys, random
+if sys.version_info >= (3,0):
+    from urllib.request import urlparse
+else:
+    from urllib import urlparse
 
 def WriteLine(fout, lst):
     fout.write('\t'.join([str(x) for x in lst]) + '\n')
