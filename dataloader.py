@@ -9,7 +9,7 @@ import time
 import csv
 import pickle
 from rdkit import Chem
-from rdkit.Chem import QED
+from rdkit.Chem.QED import qed as QED
 
 class attn_params:
     _params = None
@@ -98,7 +98,6 @@ def MakeSmilesDict(fn=None, min_freq=5, dict_file=None):
         lst = ljqpy.LoadList(dict_file)
     else:
         print("Creating dictionary file {}".format(dict_file))
-
         data = ljqpy.LoadCSV(fn)
         wdicts = [{}, {}]
         for ss in data:
@@ -116,7 +115,7 @@ def MakeSmilesDict(fn=None, min_freq=5, dict_file=None):
 
     return TokenList(lst)
 
-def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0.8, properties=["QED"]):
+def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0.8):
     if h5_file is not None and os.path.exists(h5_file):
         print('Loading data from {}'.format(h5_file))
 
@@ -128,7 +127,6 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
         data = ljqpy.LoadCSVg(fn)
 
         Xs = []
-
         Ps = []
 
         # Get structures
@@ -136,18 +134,10 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
             Ps.append(QED(Chem.MolFromSmiles(seq[0])))
             Xs.append(list(seq))
 
-        # Randomise
-        # ind = np.array(range(0,len(Xs)))
-        # random.shuffle(ind)
-
         # Split testing and training data
         # TODO(Basil): Fix ugly hack with the length of Xs...
         split_pos = int(np.floor(train_frac*np.max(np.shape(Xs))))
 
-        # train_data = pad_smiles(Xs[ind[:split_pos]], tokens, max_len)
-        # train_pps = Ps[ind[:split_pos]]
-        # test_data = pad_smiles(Xs[ind[split_pos:]], tokens, max_len)
-        # test_pps = Ps[ind[:split_pos]]
         train_data = pad_smiles(Xs[:split_pos], tokens, max_len)
         train_pps = Ps[:split_pos]
         test_data = pad_smiles(Xs[split_pos:], tokens, max_len)
@@ -163,6 +153,8 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
     return train_data, test_data, train_pps, test_pps
 
 def pad_smiles(xs, tokens, max_len=999):
+    if isinstance(xs, str):
+        xs = [[xs]]
     longest = np.max([len(x[0]) for x in xs])
     longest = min(longest+2, max_len)
 
