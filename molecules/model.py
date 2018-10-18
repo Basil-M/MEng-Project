@@ -11,7 +11,10 @@ from keras.layers.wrappers import TimeDistributed
 from keras.layers.recurrent import GRU
 from keras.layers.convolutional import Convolution1D
 from dataloader import attn_params
-import transformer as tr
+import molecules.transformer as tr
+
+
+# import transformer as tr
 
 
 class MoleculeVAE():
@@ -114,7 +117,10 @@ class Transformer:
         self.src_loc_info = True
         self.d_model = p.get("d_model")
         self.decode_model = None
-        self.latent_dim = p.get("latent_dim")
+        if p.get("latent_dim") is None:
+            self.latent_dim = p.get("d_model")
+        else:
+            self.latent_dim = p.get("latent_dim")
         self.pp_layers = p.get("pp_layers")
         d_emb = self.d_model
 
@@ -149,8 +155,16 @@ class Transformer:
         tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
         if not self.src_loc_info: src_pos = None
 
-        enc_output, kl_loss, z_mean, z_log_var = self.encoder(src_seq, src_pos, active_layers=active_layers)
-        dec_output = self.decoder(tgt_seq, tgt_pos, src_seq, enc_output, active_layers=active_layers)
+        enc_output, kl_loss, z_mean, z_log_var, enc_attn = self.encoder(src_seq,
+                                                                        src_pos,
+                                                                        active_layers=active_layers,
+                                                                        return_att=True)
+        dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq,
+                                                         tgt_pos,
+                                                         src_seq,
+                                                         enc_output,
+                                                         active_layers=active_layers,
+                                                         return_att=True)
         final_output = self.target_layer(dec_output)
 
         # Property prediction
@@ -167,7 +181,6 @@ class Transformer:
             mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
             loss = tf.reduce_sum(loss * mask, -1) / tf.reduce_sum(mask, -1)
             loss = K.mean(loss)
-
             return loss
 
         def get_accu(args):
@@ -193,6 +206,9 @@ class Transformer:
         # For encoding to z
         self.output_latent = Model([src_seq_input, tgt_seq_input], enc_output)
 
+        # For getting attentions
+        attn_list = enc_attn + dec_attn + encdec_attn
+        self.output_attns = Model([src_seq_input, tgt_seq_input], attn_list)
         self.autoencoder.compile(optimizer, None)
         self.autoencoder.metrics_names.append('ppl')
         self.autoencoder.metrics_tensors.append(self.ppl)
@@ -202,7 +218,8 @@ class Transformer:
     def make_src_seq_matrix(self, input_seq):
         src_seq = np.zeros((1, len(input_seq) + 3), dtype='int32')
         src_seq[0, 0] = self.i_tokens.startid()
-        for i, z in enumerate(input_seq): src_seq[0, 1 + i] = self.i_tokens.id(z)
+        for i, z in enumerate(input_seq):
+            src_seq[0, 1 + i] = self.i_tokens.id(z)
         src_seq[0, len(input_seq) + 1] = self.i_tokens.endid()
         return src_seq
 
@@ -229,10 +246,11 @@ class Transformer:
         src_pos = Lambda(self.get_pos_seq)(src_seq)
         tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
         if not self.src_loc_info: src_pos = None
-        enc_output = self.encoder(src_seq, src_pos)
+
+        enc_output, _, _, _ = self.encoder(src_seq, src_pos)
         self.encode_model = Model(src_seq_input, enc_output)
 
-        enc_ret_input = Input(shape=(None, self.d_model))
+        enc_ret_input = Input(shape=(None, self.latent_dim))
         dec_output = self.decoder(tgt_seq, tgt_pos, src_seq, enc_ret_input)
         final_output = self.target_layer(dec_output)
         self.decode_model = Model([src_seq_input, enc_ret_input, tgt_seq_input], final_output)
