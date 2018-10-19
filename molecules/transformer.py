@@ -7,6 +7,8 @@ from keras.callbacks import *
 from keras.initializers import *
 from keras.objectives import binary_crossentropy
 import tensorflow as tf
+from keras.preprocessing.sequence import pad_sequences
+
 
 # try:
 #     from dataloader import TokenList, pad_to_longest
@@ -191,9 +193,10 @@ def GetSubMask(s):
     mask = K.cumsum(tf.eye(len_s, batch_shape=bs), 1)
     return mask
 
+
 class Encoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
-                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, latent_dim = None, stddev=0.01):
+                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=0.01):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
         self.layers = [EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
@@ -219,8 +222,6 @@ class Encoder():
 
         # Set up bottleneck
 
-
-
         if self.stddev is None:
             # Model isn't probabilistic
             z_mean = Dense(self.latent_dim, name='z_mean', activation='linear')(h)
@@ -245,17 +246,120 @@ class Encoder():
             z_samp = Lambda(sampling, name='lambda')([z_mean, z_log_var])
             kl_loss = - 0.5 * K.mean(1 + z_log_var - K.square(z_mean) - K.exp(z_log_var), axis=-1)
 
-
         return (z_samp, kl_loss, z_mean, z_log_var, atts) if return_att else (z_samp, kl_loss, z_mean, z_log_var)
+
+
+class InterimDecoder():
+    def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
+                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=1):
+        self.emb_layer = word_emb
+        self.pos_layer = pos_emb
+        self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
+
+        if latent_dim is None: latent_dim = d_model  # no bottleneck
+
+        self.latent_embedder = Dense(d_model, input_shape=(latent_dim,))
+
+        self.latent_dim = latent_dim
+        self.stddev = stddev
+        self.mean_layer = Dense(1, input_shape=(d_model,))
+        self.logvar_layer = Dense(1, input_shape=(d_model,))
+
+    def __call__(self, mean_so_far, logvar_so_far, src_seq, enc_output, return_att=False, active_layers=999):
+        # Sample from the means/variances decoded so far
+        # def prepare_for_decoder(args):
+        #     z_mean_, z_logvar_ = args
+        #     if z_mean_ is None or z_logvar_ is None:
+        #         batch_size = K.shape(enc_output)[0]
+        #         padded_z = tf.keras.backend.zeros([batch_size, self.latent_dim], dtype='float')
+        #
+        #     else:
+        #         batch_size = K.shape(z_mean_)[0]
+        #         seq_length = K.shape(z_mean_)[2]
+        #         epsilon = K.random_normal(shape=(batch_size, 1, seq_length), mean=0., stddev=self.stddev)
+        #         sampled_z = z_mean_ + K.exp(z_logvar_ / 2) * epsilon
+        #
+        #         # Pad the sampled data
+        #         zeros_for_padding = tf.keras.backend.zeros([K.shape(sampled_z)[0], K.shape(sampled_z)[1], self.latent_dim - seq_length])
+        #
+        #         padded_z = K.concatenate([sampled_z, zeros_for_padding], axis=2)
+        #         # padded_z = pad_sequences(sampled_z, dtype='float', padding='post', maxlen=self.latent_dim)
+        #
+        #     return K.reshape(padded_z, [-1, self.latent_dim])
+        #
+        # decoder_input = self.latent_embedder(Lambda(prepare_for_decoder)([mean_so_far, logvar_so_far]))
+
+        if mean_so_far is None or logvar_so_far is None:
+            batch_size = K.shape(enc_output)[0]
+            padded_z = tf.keras.backend.zeros([batch_size, self.latent_dim], dtype='float')
+
+        else:
+            batch_size = K.shape(mean_so_far)[0]
+            seq_length = K.shape(mean_so_far)[2]
+            epsilon = K.random_normal(shape=(batch_size, 1, seq_length), mean=0., stddev=self.stddev)
+            sampled_z = mean_so_far + K.exp(logvar_so_far / 2) * epsilon
+
+            # Pad the sampled data
+            zeros_for_padding = tf.keras.backend.zeros([K.shape(sampled_z)[0], K.shape(sampled_z)[1], self.latent_dim - seq_length])
+
+            padded_z = K.concatenate([sampled_z, zeros_for_padding], axis=2)
+            # padded_z = pad_sequences(sampled_z, dtype='float', padding='post', maxlen=self.latent_dim)
+
+        decoder_input = self.latent_embedder(K.reshape(padded_z, [-1, self.latent_dim]))
+
+        # Add positional encoding
+        # pos = self.pos_layer(decoder_input)
+        z = decoder_input #Add()([decoder_input, pos])
+
+        # Mask the output
+        self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(decoder_input)
+        self_sub_mask = Lambda(GetSubMask)(decoder_input)
+        self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
+        enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([decoder_input, src_seq])
+
+        if return_att: self_atts, enc_atts = [], []
+
+        for dec_layer in self.layers[:active_layers]:
+            z, self_att, enc_att = dec_layer(z, enc_output, self_mask, enc_mask)
+            if return_att:
+                self_atts.append(self_att)
+                enc_atts.append(enc_att)
+
+        # # Map final z to the next mean/variance
+        # def prepare_output(z_):
+        #     return K.concatenate([mean_so_far, self.mean_layer(z_)]), K.concatenate([logvar_so_far, self.logvar_layer(z_)])
+
+        if mean_so_far is None or logvar_so_far is None:
+            output_mean, output_logvar = self.mean_layer(z), self.logvar_layer(z)
+        else:
+            output_mean = K.concatenate([mean_so_far, self.mean_layer(z)])
+            output_logvar = K.concatenate([logvar_so_far, self.logvar_layer(z)]) #Lambda(prepare_output)(z)
+
+        return (output_mean, output_logvar, self_atts, enc_atts) if return_att else (output_mean, output_logvar)
+
+
+class LatentToEmbedded():
+    def __init__(self, d_model, latent_dim, stddev=1):
+        self.expander_layer = Dense(d_model, input_shape=(latent_dim,))
+        self.stddev = stddev
+        self.latent_dim = latent_dim
+
+    def __call__(self, z_mean, z_log_var):
+        # Sample from the means/variances decoded so far
+        batch_size = K.shape(z_mean)[0]
+        epsilon = K.random_normal(shape=(batch_size, self.latent_dim), mean=0., stddev=self.stddev)
+        sampled_z = z_mean + K.exp(z_log_var / 2) * epsilon
+        return self.expander_layer(sampled_z)
+
 
 class Decoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
-                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, latent_dim = None):
+                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
         if not latent_dim is None:
-            self.bridge = Dense(d_model, input_shape=(latent_dim, ))
+            self.bridge = Dense(d_model, input_shape=(latent_dim,))
         else:
             self.bridge = None
 
@@ -321,7 +425,6 @@ add_layer = Lambda(lambda x: x[0] + x[1], output_shape=lambda x: x[0])
 
 
 # use this because keras may get wrong shapes with Add()([])
-
 class QANet_ConvBlock:
     def __init__(self, dim, n_conv=2, kernel_size=7, dropout=0.1):
         self.convs = [SeparableConv1D(dim, kernel_size, activation='relu', padding='same') for _ in range(n_conv)]
