@@ -288,7 +288,7 @@ class InterimDecoder():
         #     return K.reshape(padded_z, [-1, self.latent_dim])
         #
         # decoder_input = self.latent_embedder(Lambda(prepare_for_decoder)([mean_so_far, logvar_so_far]))
-
+        print("Setting up decoder iteration")
         if mean_so_far is None or logvar_so_far is None:
             batch_size = K.shape(enc_output)[0]
             padded_z = tf.keras.backend.zeros([batch_size, self.latent_dim], dtype='float')

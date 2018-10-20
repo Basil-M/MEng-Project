@@ -12,15 +12,15 @@ from os import mkdir, remove
 
 import dataloader as dd
 
-NUM_EPOCHS = 30
+NUM_EPOCHS = 50
 BATCH_SIZE = 64
-LATENT_DIM = 292
+LATENT_DIM = 128
 RANDOM_SEED = 1337
-DATA = 'data/zinc_100k.txt'
+DATA = 'data/zinc_10k.txt'
 MODEL_ARCH = 'ATTN'
 MODEL_NAME = 'attn'
 MODEL_DIR = 'models/'
-MODEL_NAME = 'VA_100K_292'
+MODEL_NAME = 'interim'
 
 
 # MODEL = 'models/model.h5'
@@ -49,7 +49,7 @@ class epoch_track(Callback):
 
 
 def get_arguments():
-    default = dd.attn_params()
+    default = dd.AttnParams()
 
     parser = argparse.ArgumentParser(description='Molecular autoencoder network')
     parser.add_argument('--data', type=str, help='The HDF5 file containing preprocessed data.',
@@ -108,7 +108,7 @@ def main():
     if args.model_arch == 'VAE':
         from molecules.model import MoleculeVAE as model_arch
     else:
-        from molecules.model import Transformer as model_arch
+        from molecules.model import TriTransformer as model_arch
 
     from molecules.utils import one_hot_array, one_hot_index, from_one_hot_array, \
         decode_smiles_from_indexes, load_dataset
@@ -146,7 +146,7 @@ def main():
     else:
         print("Making smiles dict")
 
-        params = dd.attn_params()
+        params = dd.AttnParams()
 
         # Process data
         params.set("d_file", args.data)
@@ -191,7 +191,7 @@ def main():
         current_epoch = 1
         param_filename = MODEL_DIR + "params.pkl"
         try:
-            loaded_params = dd.attn_params()
+            loaded_params = dd.AttnParams()
             if not exists(param_filename):
                 print("New model - params didn't exist.")
                 params.save(param_filename)
