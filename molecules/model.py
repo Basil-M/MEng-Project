@@ -363,28 +363,39 @@ class TriTransformer:
         i_word_emb = tr.Embedding(i_tokens.num(), d_emb)
         o_word_emb = i_word_emb
 
-        self.encoder = tr.Encoder(self.d_model, p.get("d_inner_hid"), p.get("n_head"), p.get("d_k"), p.get("d_v"),
-                                  p.get("layers"), p.get("dropout"),stddev=p.get("epsilon"),
-                                  latent_dim=p.get("latent_dim"), word_emb=i_word_emb, pos_emb=pos_emb)
+        self.encoder = tr.InterimEncoder(self.d_model, p.get("d_inner_hid"), p.get("n_head"), p.get("d_k"),
+                                         p.get("d_v"),
+                                         p.get("layers"), p.get("dropout"), stddev=p.get("epsilon"),
+                                         latent_dim=p.get("latent_dim"), word_emb=i_word_emb, pos_emb=pos_emb)
 
         self.latent_decoder = tr.InterimDecoder(self.d_model, p.get("d_inner_hid"),
                                                 p.get("n_head"), p.get("d_k"), p.get("d_v"),
-                                                p.get("layers"), p.get("dropout"),stddev=p.get("epsilon"),
+                                                p.get("layers"), p.get("dropout"), stddev=p.get("epsilon"),
                                                 latent_dim=p.get("latent_dim"), pos_emb=pos_emb)
-        self.latent_to_decoder = tr.LatentToEmbedded(self.d_model, p.get("latent_dim"), p.get("epsilon"))
+
+        self.latent_to_decoder = tr.LatentToEmbedded(self.d_model,
+                                                     latent_dim=p.get("latent_dim"),
+                                                     stddev=p.get("epsilon"))
+
         self.decoder = tr.Decoder(self.d_model, p.get("d_inner_hid"), p.get("n_head"), p.get("d_k"), p.get("d_v"),
-                                  p.get("layers"), p.get("dropout"),
-                                  latent_dim=p.get("latent_dim"), word_emb=o_word_emb, pos_emb=pos_emb)
+                                  p.get("layers"), p.get("dropout"), latent_dim=None,
+                                  word_emb=o_word_emb, pos_emb=pos_emb)
         self.target_layer = TimeDistributed(Dense(o_tokens.num(), use_bias=False))
+        self.printer = Lambda(self.print_shape)
 
     def get_pos_seq(self, x):
         mask = K.cast(K.not_equal(x, 0), 'int32')
         pos = K.cumsum(K.ones_like(x, 'int32'), 1)
         return pos * mask
 
+    def print_shape(self, arg):
+        s = K.shape(arg)
+        s = K.print_tensor(s, "SHAPE OF {}: ".format(arg.name))
+        return K.reshape(arg, s)
+
     def compile_vae(self, optimizer='adam', active_layers=999):
-        src_seq_input = Input(shape=(None,), dtype='int32')
-        tgt_seq_input = Input(shape=(None,), dtype='int32')
+        src_seq_input = Input(shape=(None,), dtype='int32', name='src_seq_input')
+        tgt_seq_input = Input(shape=(None,), dtype='int32', name='tgt_seq_input')
 
         src_seq = src_seq_input
         tgt_seq = Lambda(lambda x: x[:, :-1])(tgt_seq_input)
@@ -394,22 +405,22 @@ class TriTransformer:
         tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
         if not self.src_loc_info: src_pos = None
 
-        enc_output, kl_loss, z_mean, z_log_var, enc_attn = self.encoder(src_seq,
-                                                                        src_pos,
-                                                                        active_layers=active_layers,
-                                                                        return_att=True)
+        enc_output, enc_attn = self.encoder(src_seq,
+                                            src_pos,
+                                            active_layers=active_layers,
+                                            return_att=True)
 
-        z_mean = None #tf.keras.backend.zeros((None,1), dtype='float')
-        z_log_var = None #tf.keras.backend.ones((None,1), dtype='float')
-        for _ in range(self.latent_dim):
-            z_mean, z_log_var = self.latent_decoder(z_mean, z_log_var, src_seq, enc_output)
+        z_mean, z_logvar = self.latent_decoder.first_iter(src_seq, enc_output)
+        # z_mean = self.printer(z_mean)
+        for _ in range(self.latent_dim - 1):
+            z_mean, z_logvar = self.latent_decoder(src_seq, enc_output, z_mean, z_logvar)
+            # z_mean = self.printer(z_mean)
 
-        dec_input = self.latent_to_decoder(z_mean, z_log_var)
-
+        dec_input = self.latent_to_decoder(z_mean, z_logvar)
         dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq,
                                                          tgt_pos,
                                                          src_seq,
-                                                         enc_output,
+                                                         dec_input,
                                                          active_layers=active_layers,
                                                          return_att=True)
         final_output = self.target_layer(dec_output)
@@ -422,13 +433,20 @@ class TriTransformer:
         prop_output = Dense(1, activation='linear')(h)
 
         def get_loss(args):
-            y_pred, y_true = args
+            y_pred, y_true, z_mean_, z_log_var_ = args
             y_true = tf.cast(y_true, 'int32')
             loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true, logits=y_pred)
             mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
             loss = tf.reduce_sum(loss * mask, -1) / tf.reduce_sum(mask, -1)
-            loss = K.mean(loss)
-            return loss
+            reconstruction_loss = K.mean(loss)
+            # reconstruction_loss = K.print_tensor(reconstruction_loss, "RECONSTRUCTION_LOSS:")
+
+            # z_mean_ = K.print_tensor(z_mean_, "Z_MEAN_: ")
+            # z_log_var_ = K.print_tensor(z_log_var_, "Z_LOG_VAR_: ")
+            kl_loss = - 0.5 * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_))
+            # kl_loss = self.print_shape(kl_loss)
+            # kl_loss = K.print_tensor(kl_loss, "KL_LOSS")
+            return reconstruction_loss + kl_loss
 
         def get_accu(args):
             y_pred, y_true = args
@@ -437,9 +455,12 @@ class TriTransformer:
             corr = K.sum(corr * mask, -1) / K.sum(mask, -1)
             return K.mean(corr)
 
-        loss = Lambda(get_loss)([final_output, tgt_true])
+        loss = Lambda(get_loss, name='LossFn')([final_output, tgt_true, z_mean, z_logvar])
         self.ppl = Lambda(K.exp)(loss)
         self.accu = Lambda(get_accu)([final_output, tgt_true])
+
+        # For encoding to z
+        self.output_latent = Model([src_seq_input, tgt_seq_input], [z_mean, z_logvar])
 
         self.autoencoder = Model([src_seq_input, tgt_seq_input], loss)
         self.autoencoder.add_loss([loss])
@@ -450,9 +471,6 @@ class TriTransformer:
         # For outputting next symbol
         self.output_model = Model([src_seq_input, tgt_seq_input], final_output)
 
-        # For encoding to z
-        # self.output_latent = Model([src_seq_input, tgt_seq_input], [z_mean, z_log_var])
-
         # For getting attentions
         attn_list = enc_attn + dec_attn + encdec_attn
         self.output_attns = Model([src_seq_input, tgt_seq_input], attn_list)
@@ -461,7 +479,8 @@ class TriTransformer:
         self.autoencoder.metrics_tensors.append(self.ppl)
         self.autoencoder.metrics_names.append('accu')
         self.autoencoder.metrics_tensors.append(self.accu)
-        self.make_fast_decode_model()
+        # self.autoencoder.summary()
+        # self.make_fast_decode_model()
 
     def make_src_seq_matrix(self, input_seq):
         '''
@@ -479,6 +498,9 @@ class TriTransformer:
     def decode_sequence(self, input_seq, delimiter=''):
         src_seq = self.make_src_seq_matrix(input_seq)
         decoded_tokens = []
+
+        # First get the latent representation
+
         target_seq = np.zeros((1, self.len_limit), dtype='int32')
         target_seq[0, 0] = self.o_tokens.startid()
         for i in range(self.len_limit - 1):
@@ -491,17 +513,16 @@ class TriTransformer:
         return delimiter.join(decoded_tokens[:-1])
 
     def make_fast_decode_model(self):
-        src_seq_input = Input(shape=(None,), dtype='int32')
-        tgt_seq_input = Input(shape=(None,), dtype='int32')
-        src_seq = src_seq_input
-        tgt_seq = tgt_seq_input
-
+        src_seq = Input(shape=(None,), dtype='int32')
+        latent_seq_input = Input(shape=(None,), dtype='float')
+        tgt_seq = Input(shape=(None,), dtype='int32')
         src_pos = Lambda(self.get_pos_seq)(src_seq)
         tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
         if not self.src_loc_info: src_pos = None
 
+        # Decode latent representation
         enc_output, _, _, _ = self.encoder(src_seq, src_pos)
-        self.encode_model = Model(src_seq_input, enc_output)
+        self.encode_model = Model(src_seq, enc_output)
 
         enc_ret_input = Input(shape=(None, self.latent_dim))
         dec_output = self.decoder(tgt_seq, tgt_pos, src_seq, enc_output)
@@ -509,7 +530,7 @@ class TriTransformer:
 
         # Only need to run encoder once then run decoder several times
         # So take latent rep as an input
-        self.decode_model = Model([src_seq_input, enc_ret_input, tgt_seq_input], final_output)
+        self.decode_model = Model([src_seq, enc_ret_input, tgt_seq], final_output)
 
         self.encode_model.compile('adam', 'mse')
         self.decode_model.compile('adam', 'mse')

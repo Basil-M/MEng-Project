@@ -20,7 +20,7 @@ DATA = 'data/zinc_10k.txt'
 MODEL_ARCH = 'ATTN'
 MODEL_NAME = 'attn'
 MODEL_DIR = 'models/'
-MODEL_NAME = 'interim'
+MODEL_NAME = 'interim2'
 
 
 # MODEL = 'models/model.h5'
@@ -185,7 +185,7 @@ def main():
                                  write_graph=True,
                                  write_images=True,
                                  update_freq='batch')
-        model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9))
+        model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
 
         # Resuming from previous training
         current_epoch = 1
@@ -245,6 +245,9 @@ def main():
             if not params.get("ae_trained"):
                 print("Training autoencoder.")
 
+                # d0 = data_train[1]
+                # s = model.output_latent.predict([d0, d0], 1)
+                # print(s)
                 # Delete any existing datafiles containing latent representations
                 if exists(MODEL_DIR + "latents.h5"):
                     remove(MODEL_DIR + "latents.h5")
@@ -252,7 +255,7 @@ def main():
                 model.autoencoder.fit([data_train, data_train], None, batch_size=args.batch_size,
                                       epochs=args.epochs, initial_epoch=current_epoch - 1,
                                       validation_data=([data_test, data_test], None),
-                                      callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback, ep_track])
+                                      callbacks=[lr_scheduler])#, model_saver, best_model_saver, tbCallback, ep_track])
 
             print("Autoencoder training complete. Loading best model.")
             model.autoencoder.load_weights(MODEL_DIR + "best_model.h5")

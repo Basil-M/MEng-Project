@@ -24,14 +24,14 @@ class AttnParams:
             "ae_trained": False,
             "batch_size": 64,
             "len_limit": 120,
-            "d_model": 128,
-            "d_inner_hid": 512,
+            "d_model": 64,
+            "d_inner_hid": 128,
             "n_head": 8,
             "d_k": 8,
             "d_v": 8,
-            "layers": 3,
+            "layers": 1,
             "dropout": 0.1,
-            "latent_dim": 5, #64
+            "latent_dim": 16, #64
             "epsilon": 1,
             "pp_epochs": 15,
             "pp_layers": 3
