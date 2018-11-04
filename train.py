@@ -69,7 +69,7 @@ def get_arguments():
     parser.add_argument('--random_seed', type=int, metavar='N', default=RANDOM_SEED,
                         help='Seed to use to start randomizer for shuffling.')
     parser.add_argument('--model_arch', type=str, metavar='N', default=MODEL_ARCH,
-                        help='Model architecture to use - options are VAE and ATTN')
+                        help='Model architecture to use - options are VAE, ATTN and ATTN_ID')
 
     ### MODEL PARAMETERS
     parser.add_argument('--latent_dim', type=int, metavar='N', default=default.get("latent_dim"),
@@ -164,6 +164,52 @@ def main():
         if not exists(MODEL_DIR):
             mkdir(MODEL_DIR)
 
+        # Handle parameters
+        current_epoch = 1
+        param_filename = MODEL_DIR + "params.pkl"
+        loaded_params = dd.AttnParams()
+        if not exists(param_filename):
+            print("New model - params didn't exist.")
+            params.save(param_filename)
+        else:
+            loaded_params.load(param_filename)
+            print("Found model also named {} with params:".format(args.model))
+            loaded_params.dump()
+
+            # Found pre-existing training with current_epoch
+            current_epoch = loaded_params.get("current_epoch")
+
+            # Allow for increasing number of epochs of pre-trained model
+            if params.get("epochs") > loaded_params.get("epochs"):
+                print(
+                    "Number of epochs increased to {} from {} - autoencoder may require further training. If so, property predictor may be trained from scratch.".format(
+                        params.get("epochs"), loaded_params.get("epochs")))
+                loaded_params.set("ae_trained", False)
+                loaded_params.set("epochs", params.get("epochs"))
+
+            elif params.get("pp_epochs") > loaded_params.get("pp_epochs"):
+                print(
+                    "Number of property predictor epochs increased to {} from {}, but autoencoder is fully trained. Property predictor will continue training.".format(
+                        params.get("pp_epochs"), loaded_params.get("pp_epochs")))
+                loaded_params.set("pp_epochs", params.get("pp_epochs"))
+
+            if loaded_params.get("ae_trained"):
+                print(
+                    "Found model with fully trained auto-encoder.\nProperty predictor has been trained for {} epochs - continuing from epoch {}".format(
+                        current_epoch - 1,
+                        current_epoch))
+            elif current_epoch != 1:
+                print(
+                    "Found model trained for {} epochs - continuing from epoch {}".format(current_epoch - 1,
+                                                                                          current_epoch))
+
+                params = loaded_params
+
+        if params.get("arch") == "simple":
+            from molecules.model import Transformer as model_arch
+        else:
+            from molecules.model import TriTransformer as model_arch
+
         # Set up model
         model = model_arch(tokens, params)
 
@@ -186,48 +232,8 @@ def main():
                                  write_images=True,
                                  update_freq='batch')
         model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
-
-        # Resuming from previous training
-        current_epoch = 1
-        param_filename = MODEL_DIR + "params.pkl"
+        model.autoencoder.summary()
         try:
-            loaded_params = dd.AttnParams()
-            if not exists(param_filename):
-                print("New model - params didn't exist.")
-                params.save(param_filename)
-            else:
-                loaded_params.load(param_filename)
-                print("Found model also named {} with params:".format(args.model))
-                loaded_params.dump()
-
-                # Found pre-existing training with current_epoch
-                current_epoch = loaded_params.get("current_epoch")
-
-                # Allow for increasing number of epochs of pre-trained model
-                if params.get("epochs") > loaded_params.get("epochs"):
-                    print(
-                        "Number of epochs increased to {} from {} - autoencoder may require further training. If so, property predictor may be trained from scratch.".format(
-                            params.get("epochs"), loaded_params.get("epochs")))
-                    loaded_params.set("ae_trained", False)
-                    loaded_params.set("epochs", params.get("epochs"))
-
-                elif params.get("pp_epochs") > loaded_params.get("pp_epochs"):
-                    print(
-                        "Number of property predictor epochs increased to {} from {}, but autoencoder is fully trained. Property predictor will continue training.".format(
-                            params.get("pp_epochs"), loaded_params.get("pp_epochs")))
-                    loaded_params.set("pp_epochs", params.get("pp_epochs"))
-
-                if loaded_params.get("ae_trained"):
-                    print(
-                        "Found model with fully trained auto-encoder.\nProperty predictor has been trained for {} epochs - continuing from epoch {}".format(
-                            current_epoch - 1,
-                            current_epoch))
-                elif current_epoch != 1:
-                    print(
-                        "Found model trained for {} epochs - continuing from epoch {}".format(current_epoch - 1,
-                                                                                              current_epoch))
-
-                    params = loaded_params
                 model.autoencoder.load_weights(MODEL_DIR + "model.h5")
         except:
             print("New model.")

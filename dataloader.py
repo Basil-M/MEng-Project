@@ -31,10 +31,11 @@ class AttnParams:
             "d_v": 8,
             "layers": 1,
             "dropout": 0.1,
-            "latent_dim": 16, #64
+            "latent_dim": 8, #64
             "epsilon": 1,
             "pp_epochs": 15,
-            "pp_layers": 3
+            "pp_layers": 3,
+            "arch": "ATTN",
         }
 
     def get(self, param):
