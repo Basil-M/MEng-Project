@@ -10,7 +10,61 @@ import csv
 import pickle
 from rdkit import Chem
 from rdkit.Chem.QED import qed as QED
+from keras.utils import Sequence
 
+
+class SMILESgen:
+    def __init__(self, data_filename, batch_size, shuffle=True):
+        self.data_file = h5py.File(data_filename, 'r')
+        self.train_data = SMILES_data(self.data_file['train'], batch_size, shuffle)
+        self.test_data = SMILES_data(self.data_file['test'], batch_size, shuffle)
+
+    def __delete__(self):
+        self.data_file.close()
+
+class SMILES_data(Sequence):
+    def __init__(self, data, batch_size, shuffle=True):
+        self.data = data
+        self.bs = batch_size
+        self.ind = 0
+        self.shuffle = shuffle
+
+    def __len__(self):
+        return int(np.floor(len(self.data) / self.bs))
+
+    def __getitem__(self, idx):
+        self.ind += self.bs
+        s = np.array(self.data[self.ind - self.bs:self.ind])
+        return s, None
+
+    def on_epoch_end(self):
+        self.ind = 0
+        if self.shuffle:
+            indices = range(len(self.data))
+            np.random.shuffle(indices)
+            self.data = self.data[indices]
+
+class SMILES(Sequence):
+    def __init__(self, data_filename, batch_size, partition='train', shuffle=True):
+        with h5py.File(data_filename,'r') as f:
+            self.data = f[partition]
+        self.bs = batch_size
+        self.ind = 0
+        self.shuffle = shuffle
+
+    def __len__(self):
+        return int(np.floor(len(self.data)/self.bs))
+
+    def __getitem__(self, idx):
+        s = self.data[self.ind-self.bs:self.ind]
+        return s
+
+    def on_epoch_end(self):
+        self.ind = 0
+        if self.shuffle:
+            indices = range(len(self.data))
+            np.random.shuffle(indices)
+            self.data = self.data[indices]
 
 class AttnParams:
     _params = None
@@ -96,8 +150,6 @@ class TokenList:
 
     def endid(self):
         return 3
-
-
 
 def MakeSmilesDict(fn=None, min_freq=5, dict_file=None):
     if dict_file is not None and os.path.exists(dict_file):

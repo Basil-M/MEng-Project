@@ -4,6 +4,7 @@ import argparse
 import os
 import h5py
 import numpy as np
+
 from keras.optimizers import Adam
 from keras.callbacks import Callback
 from molecules.transformer import LRSchedulerPerStep, LRSchedulerPerEpoch
@@ -17,15 +18,13 @@ BATCH_SIZE = 64
 LATENT_DIM = 128
 RANDOM_SEED = 1337
 DATA = 'data/zinc_10k.txt'
-MODEL_ARCH = 'ATTN'
+MODEL_ARCH = 'ATTN_ID'
 MODEL_NAME = 'attn'
 MODEL_DIR = 'models/'
-MODEL_NAME = 'interim2'
+MODEL_NAME = 'latent_test2'
 
 
-# MODEL = 'models/model.h5'
-# MODEL_LOGDIR
-
+###################################
 
 class epoch_track(Callback):
     def __init__(self, params, param_filename):
@@ -152,8 +151,12 @@ def main():
         params.set("d_file", args.data)
         d_file = args.data
         tokens = dd.MakeSmilesDict(d_file, dict_file=d_file.replace('.txt', '_dict.txt'))
-        data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
+        # data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
+                                                                           # h5_file=d_file.replace('.txt', '_data.h5'))
+        _,_, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
                                                                            h5_file=d_file.replace('.txt', '_data.h5'))
+        gen = dd.SMILESgen(d_file.replace('.txt', '_data.h5'), args.batch_size)
+
 
         # Set up model
         for arg in vars(args):
@@ -231,6 +234,7 @@ def main():
                                  write_graph=True,
                                  write_images=True,
                                  update_freq='batch')
+
         model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
         model.autoencoder.summary()
         try:
@@ -251,10 +255,16 @@ def main():
                 if exists(MODEL_DIR + "latents.h5"):
                     remove(MODEL_DIR + "latents.h5")
 
-                model.autoencoder.fit([data_train, data_train], None, batch_size=args.batch_size,
-                                      epochs=args.epochs, initial_epoch=current_epoch - 1,
-                                      validation_data=([data_test, data_test], None),
-                                      callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback, ep_track])
+
+                model.autoencoder.fit_generator(gen.train_data, None,
+                                                epochs=args.epochs, initial_epoch=current_epoch-1,
+                                                validation_data=gen.test_data,
+                                                callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback,
+                                                           ep_track])
+                # model.autoencoder.fit(data_train, None, batch_size=args.batch_size,
+                #                       epochs=args.epochs, initial_epoch=current_epoch - 1,
+                #                       validation_data=(data_test, None),
+                #                       callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback, ep_track])
 
             print("Autoencoder training complete. Loading best model.")
             model.autoencoder.load_weights(MODEL_DIR + "best_model.h5")
@@ -264,6 +274,9 @@ def main():
                 print("Generating latent representations from auto-encoder for property predictor training.")
                 z_train = model.output_latent.predict([data_train, data_train], 64)
                 z_test = model.output_latent.predict([data_test, data_test], 64)
+
+
+                s = z_train[0]
 
                 with h5py.File(MODEL_DIR + "latents.h5", 'w') as dfile:
                     dfile.create_dataset('z_test', data=z_test)
