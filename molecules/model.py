@@ -368,7 +368,7 @@ class TriTransformer:
                                          p.get("layers"), p.get("dropout"), stddev=p.get("epsilon"),
                                          latent_dim=p.get("latent_dim"), word_emb=i_word_emb, pos_emb=pos_emb)
 
-        self.latent_decoder = tr.InterimDecoder(self.d_model, p.get("d_inner_hid"),
+        self.latent_decoder = tr.RNNDecoder(self.d_model, p.get("d_inner_hid"),
                                                 p.get("n_head"), p.get("d_k"), p.get("d_v"),
                                                 p.get("layers"), p.get("dropout"), stddev=p.get("epsilon"),
                                                 latent_dim=p.get("latent_dim"), pos_emb=pos_emb)
@@ -395,7 +395,7 @@ class TriTransformer:
 
     def compile_vae(self, optimizer='adam', active_layers=999):
         src_seq_input = Input(shape=(None,), dtype='int32', name='src_seq_input')
-        tgt_seq_input = Input(shape=(None,), dtype='int32', name='tgt_seq_input')
+        tgt_seq_input = src_seq_input #Input(shape=(None,), dtype='int32', name='tgt_seq_input')
 
         src_seq = src_seq_input
         tgt_seq = Lambda(lambda x: x[:, :-1])(tgt_seq_input)
@@ -410,10 +410,10 @@ class TriTransformer:
                                             active_layers=active_layers,
                                             return_att=True)
 
-        z_mean, z_logvar = self.latent_decoder.first_iter(src_seq, enc_output)
+        z_mean, z_logvar = self.latent_decoder(src_seq, enc_output)
         # z_mean = self.printer(z_mean)
-        for _ in range(self.latent_dim - 1):
-            z_mean, z_logvar = self.latent_decoder(src_seq, enc_output, z_mean, z_logvar)
+        # for _ in range(self.latent_dim - 1):
+        #     z_mean, z_logvar = self.latent_decoder(src_seq, enc_output, z_mean, z_logvar)
             # z_mean = self.printer(z_mean)
 
         dec_input = self.latent_to_decoder(z_mean, z_logvar)
@@ -460,20 +460,20 @@ class TriTransformer:
         self.accu = Lambda(get_accu)([final_output, tgt_true])
 
         # For encoding to z
-        self.output_latent = Model([src_seq_input, tgt_seq_input], [z_mean, z_logvar])
+        self.output_latent = Model(src_seq_input, [z_mean, z_logvar])
 
-        self.autoencoder = Model([src_seq_input, tgt_seq_input], loss)
+        self.autoencoder = Model(src_seq_input, loss)
         self.autoencoder.add_loss([loss])
 
         # For property prediction
         self.property_predictor = Model(encoded_input, prop_output)
 
         # For outputting next symbol
-        self.output_model = Model([src_seq_input, tgt_seq_input], final_output)
+        self.output_model = Model(src_seq_input, final_output)
 
         # For getting attentions
         attn_list = enc_attn + dec_attn + encdec_attn
-        self.output_attns = Model([src_seq_input, tgt_seq_input], attn_list)
+        self.output_attns = Model(src_seq_input, attn_list)
         self.autoencoder.compile(optimizer, None)
         self.autoencoder.metrics_names.append('ppl')
         self.autoencoder.metrics_tensors.append(self.ppl)
