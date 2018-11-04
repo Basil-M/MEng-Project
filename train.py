@@ -205,7 +205,7 @@ def main():
 
                 params = loaded_params
 
-        if params.get("arch") == "simple":
+        if params.get("arch") == "ATTN":
             from molecules.model import Transformer as model_arch
         else:
             from molecules.model import TriTransformer as model_arch
