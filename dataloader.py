@@ -35,7 +35,7 @@ class AttnParams:
             "epsilon": 1,
             "pp_epochs": 15,
             "pp_layers": 3,
-            "arch": "ATTN",
+            "model_arch": "ATTN",
         }
 
     def get(self, param):
@@ -63,12 +63,12 @@ class AttnParams:
         # get max length
         m_len = max([len(key) for key in self._params])
 
-        for key, value in self._params.iteritems():
-            print("\t{}  {}".format(key.ljust(m_len), value))
+        for key in self._params:
+            print("\t{}  {}".format(key.ljust(m_len), self._params[key]))
 
     def equals(self, other_params):
-        for key, value in self._params.iteritems():
-            if other_params._params[key] != value and not key in self._training_params:
+        for key in self._params:
+            if other_params._params[key] != self._params[key] and not key in self._training_params:
                 return False
         return True
 
