@@ -368,7 +368,7 @@ class TriTransformer:
                                          p.get("layers"), p.get("dropout"), stddev=p.get("epsilon"),
                                          latent_dim=p.get("latent_dim"), word_emb=i_word_emb, pos_emb=pos_emb)
 
-        self.latent_decoder = tr.RNNDecoder(self.d_model, p.get("d_inner_hid"),
+        self.latent_decoder = tr.InterimDecoder(self.d_model, p.get("d_inner_hid"),
                                                 p.get("n_head"), p.get("d_k"), p.get("d_v"),
                                                 p.get("layers"), p.get("dropout"), stddev=p.get("epsilon"),
                                                 latent_dim=p.get("latent_dim"), pos_emb=pos_emb)
@@ -410,10 +410,11 @@ class TriTransformer:
                                             active_layers=active_layers,
                                             return_att=True)
 
-        z_mean, z_logvar = self.latent_decoder(src_seq, enc_output)
+        z_mean, z_logvar = self.latent_decoder.first_iter(src_seq, enc_output)
+        print("Finished setting up decoder.")
         # z_mean = self.printer(z_mean)
-        # for _ in range(self.latent_dim - 1):
-        #     z_mean, z_logvar = self.latent_decoder(src_seq, enc_output, z_mean, z_logvar)
+        for _ in range(self.latent_dim - 1):
+            z_mean, z_logvar = self.latent_decoder(src_seq, enc_output, z_mean, z_logvar)
             # z_mean = self.printer(z_mean)
 
         dec_input = self.latent_to_decoder(z_mean, z_logvar)
