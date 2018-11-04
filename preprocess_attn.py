@@ -2,9 +2,7 @@ import argparse
 import pandas
 import h5py
 import numpy as np
-from molecules.utils import one_hot_array, one_hot_index
-
-from sklearn.model_selection import train_test_split
+from rdkit import Chem
 
 MAX_NUM_ROWS = 100000
 SMILES_COL_NAME = 'structure'
@@ -52,7 +50,11 @@ def main():
     #Write structures to output
     f = open(args.outfile, 'w')
     for struct in structures:
-        f.write(struct + "\n") # + "\t" + struct + "\n")
+        #canonicalise
+        mol = Chem.MolFromSmiles(struct)
+        if mol:
+            struct = Chem.MolToSmiles(mol)
+            f.write(struct + "\n") # + "\t" + struct + "\n")
         # f.write(struct + "\t" + struct + "\n")
 
 if __name__ == '__main__':
