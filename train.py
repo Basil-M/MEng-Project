@@ -197,41 +197,37 @@ def main():
                 params.save(param_filename)
             else:
                 loaded_params.load(param_filename)
+                print("Found model also named {} with params:".format(args.model))
+                loaded_params.dump()
 
-                if params.equals(loaded_params) == 0:
-                    print("Found model also named {} but with different parameters:".format(args.model))
-                    loaded_params.dump()
-                    print("Please choose a different model name.")
-                    return 0
-                else:
-                    # Found pre-existing training with current_epoch
-                    current_epoch = loaded_params.get("current_epoch")
+                # Found pre-existing training with current_epoch
+                current_epoch = loaded_params.get("current_epoch")
 
-                    # Allow for increasing number of epochs of pre-trained model
-                    if params.get("epochs") > loaded_params.get("epochs"):
-                        print(
-                            "Number of epochs increased to {} from {} - autoencoder may require further training. If so, property predictor may be trained from scratch.".format(
-                                params.get("epochs"), loaded_params.get("epochs")))
-                        loaded_params.set("ae_trained", False)
-                        loaded_params.set("epochs", params.get("epochs"))
+                # Allow for increasing number of epochs of pre-trained model
+                if params.get("epochs") > loaded_params.get("epochs"):
+                    print(
+                        "Number of epochs increased to {} from {} - autoencoder may require further training. If so, property predictor may be trained from scratch.".format(
+                            params.get("epochs"), loaded_params.get("epochs")))
+                    loaded_params.set("ae_trained", False)
+                    loaded_params.set("epochs", params.get("epochs"))
 
-                    elif params.get("pp_epochs") > loaded_params.get("pp_epochs"):
-                        print(
-                            "Number of property predictor epochs increased to {} from {}, but autoencoder is fully trained. Property predictor will continue training.".format(
-                                params.get("pp_epochs"), loaded_params.get("pp_epochs")))
-                        loaded_params.set("pp_epochs", params.get("pp_epochs"))
+                elif params.get("pp_epochs") > loaded_params.get("pp_epochs"):
+                    print(
+                        "Number of property predictor epochs increased to {} from {}, but autoencoder is fully trained. Property predictor will continue training.".format(
+                            params.get("pp_epochs"), loaded_params.get("pp_epochs")))
+                    loaded_params.set("pp_epochs", params.get("pp_epochs"))
 
-                    if loaded_params.get("ae_trained"):
-                        print(
-                            "Found model with fully trained auto-encoder.\nProperty predictor has been trained for {} epochs - continuing from epoch {}".format(
-                                current_epoch - 1,
-                                current_epoch))
-                    elif current_epoch != 1:
-                        print(
-                            "Found model trained for {} epochs - continuing from epoch {}".format(current_epoch - 1,
-                                                                                                  current_epoch))
+                if loaded_params.get("ae_trained"):
+                    print(
+                        "Found model with fully trained auto-encoder.\nProperty predictor has been trained for {} epochs - continuing from epoch {}".format(
+                            current_epoch - 1,
+                            current_epoch))
+                elif current_epoch != 1:
+                    print(
+                        "Found model trained for {} epochs - continuing from epoch {}".format(current_epoch - 1,
+                                                                                              current_epoch))
 
-                        params = loaded_params
+                    params = loaded_params
                 model.autoencoder.load_weights(MODEL_DIR + "model.h5")
         except:
             print("New model.")
@@ -245,9 +241,6 @@ def main():
             if not params.get("ae_trained"):
                 print("Training autoencoder.")
 
-                # d0 = data_train[1]
-                # s = model.output_latent.predict([d0, d0], 1)
-                # print(s)
                 # Delete any existing datafiles containing latent representations
                 if exists(MODEL_DIR + "latents.h5"):
                     remove(MODEL_DIR + "latents.h5")
@@ -255,7 +248,7 @@ def main():
                 model.autoencoder.fit([data_train, data_train], None, batch_size=args.batch_size,
                                       epochs=args.epochs, initial_epoch=current_epoch - 1,
                                       validation_data=([data_test, data_test], None),
-                                      callbacks=[lr_scheduler])#, model_saver, best_model_saver, tbCallback, ep_track])
+                                      callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback, ep_track])
 
             print("Autoencoder training complete. Loading best model.")
             model.autoencoder.load_weights(MODEL_DIR + "best_model.h5")
