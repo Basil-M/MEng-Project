@@ -411,11 +411,14 @@ class TriTransformer:
                                             return_att=True)
 
         z_mean, z_logvar = self.latent_decoder.first_iter(src_seq, enc_output)
-        print("Finished setting up decoder.")
         # z_mean = self.printer(z_mean)
-        for _ in range(self.latent_dim - 1):
+        for k in range(self.latent_dim - 1):
+            print("Setting up decoder iteration {}".format(k+2))
             z_mean, z_logvar = self.latent_decoder(src_seq, enc_output, z_mean, z_logvar)
             # z_mean = self.printer(z_mean)
+
+        print("Finished setting up decoder.")
+
 
         dec_input = self.latent_to_decoder(z_mean, z_logvar)
         dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq,
