@@ -14,14 +14,14 @@ from os import mkdir, remove
 import dataloader as dd
 
 NUM_EPOCHS = 50
-BATCH_SIZE = 64
+BATCH_SIZE = 50
 LATENT_DIM = 128
 RANDOM_SEED = 1337
 DATA = 'data/zinc_10k.txt'
 MODEL_ARCH = 'ATTN_ID'
 MODEL_NAME = 'attn'
 MODEL_DIR = 'models/'
-MODEL_NAME = 'latent_test2'
+MODEL_NAME = 'latent_test6'
 
 
 ###################################
