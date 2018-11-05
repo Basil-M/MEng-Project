@@ -511,8 +511,6 @@ class InterimDecoder():
         return (output_mean, output_logvar, self_atts, enc_atts) if return_att else (output_mean, output_logvar)
 
     def __call__(self, src_seq, enc_output, mean_so_far=None, logvar_so_far=None, return_att=False, active_layers=999):
-
-
         sampled_z = self.sampler([mean_so_far, logvar_so_far])
 
         # Should be vector of size [batch_size, latent_dim]

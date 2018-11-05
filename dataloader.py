@@ -26,6 +26,7 @@ class SMILES_data(Sequence):
     def __init__(self, data, batch_size, shuffle=True):
         self.data = data
         self.bs = batch_size
+        self.indices = range(len(self.data))
         self.ind = 0
         self.shuffle = shuffle
 
@@ -34,15 +35,13 @@ class SMILES_data(Sequence):
 
     def __getitem__(self, idx):
         self.ind += self.bs
-        s = np.array(self.data[self.ind - self.bs:self.ind])
+        s = np.array(self.data[self.indices[self.ind - self.bs:self.ind]])
         return s, None
 
     def on_epoch_end(self):
         self.ind = 0
         if self.shuffle:
-            indices = range(len(self.data))
-            np.random.shuffle(indices)
-            self.data = self.data[indices]
+            np.random.shuffle(self.indices)
 
 class SMILES(Sequence):
     def __init__(self, data_filename, batch_size, partition='train', shuffle=True):
@@ -83,9 +82,9 @@ class AttnParams:
             "n_head": 8,
             "d_k": 8,
             "d_v": 8,
-            "layers": 1,
+            "layers": 3,
             "dropout": 0.1,
-            "latent_dim": 8, #64
+            "latent_dim": 96, #64
             "epsilon": 1,
             "pp_epochs": 15,
             "pp_layers": 3,
@@ -226,7 +225,6 @@ def SmilesToArray(xs, tokens, max_len=999):
         xs = [xs]
     elif isinstance(xs[0], list):
         xs = [x[0] for x in xs]
-
 
     # find longest string
     longest = np.max([len(x) for x in xs])
