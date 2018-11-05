@@ -10,7 +10,11 @@ from keras.callbacks import Callback
 from molecules.transformer import LRSchedulerPerStep, LRSchedulerPerEpoch
 from os.path import exists
 from os import mkdir, remove
-
+import tensorflow as tf
+from keras import backend as k
+config = tf.ConfigProto()
+config.gpu_options.allow_growth=True
+k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
 NUM_EPOCHS = 50
@@ -259,13 +263,16 @@ def main():
                 if exists(MODEL_DIR + "latents.h5"):
                     remove(MODEL_DIR + "latents.h5")
 
+		
                 if args.gen:
+                    print("Using generator for data!")
                     model.autoencoder.fit_generator(gen.train_data, None,
                                                     epochs=args.epochs, initial_epoch=current_epoch-1,
                                                     validation_data=gen.test_data,
                                                     callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback,
                                                                ep_track])
                 else:
+                    print("Not using generator for data.")
                     model.autoencoder.fit(data_train, None, batch_size=args.batch_size,
                                           epochs=args.epochs, initial_epoch=current_epoch - 1,
                                           validation_data=(data_test, None),

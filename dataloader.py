@@ -26,7 +26,7 @@ class SMILES_data(Sequence):
     def __init__(self, data, batch_size, shuffle=True):
         self.data = data
         self.bs = batch_size
-        self.indices = range(len(self.data))
+        self.indices = list(range(len(self.data)))
         self.ind = 0
         self.shuffle = shuffle
 

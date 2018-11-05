@@ -346,7 +346,7 @@ class RNNDecoder():
         self.pad_zeros = Lambda(pad_with_zeros, name='ZerosForPadding')
         self.d_model = d_model
         self.resh = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))
-        self.ldim = K.constant(self.latent_dim + 1, dtype='int32')
+        self.ldim = K.constant(self.latent_dim, dtype='int32')
 
     def __call__(self, src_seq, enc_output):
         mean_init, var_init = self.first_iter(src_seq, enc_output)
