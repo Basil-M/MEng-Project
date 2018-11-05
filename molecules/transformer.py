@@ -357,7 +357,8 @@ class RNNDecoder():
                                                    shape_invariants=[tf.TensorShape([None, None]),
                                                                      tf.TensorShape([None, None]),
                                                                      src_seq.get_shape(),
-                                                                     enc_output.get_shape()])
+                                                                     enc_output.get_shape()],
+                                                   parallel_iterations=32)
             return [z_mean, z_logvar]
 
         return Lambda(the_loop)([mean_init, var_init])

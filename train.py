@@ -18,17 +18,24 @@ k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
 NUM_EPOCHS = 50
-BATCH_SIZE = 50
+BATCH_SIZE = 10
 LATENT_DIM = 128
 RANDOM_SEED = 1337
-DATA = 'data/zinc_10k.txt'
+DATA = 'data/zinc_1k.txt'
 MODEL_ARCH = 'ATTN_ID'
 MODEL_NAME = 'attn'
+MODEL_NAME = 'LT2'
 MODEL_DIR = 'models/'
-MODEL_NAME = 'latent_test2'
 
+## extra imports to set GPU options
+from tensorflow import ConfigProto, Session
+from keras.backend.tensorflow_backend import set_session
 
 ###################################
+# Prevent GPU pre-allocation
+config = ConfigProto()
+config.gpu_options.allow_growth = True
+set_session(Session(config=config))
 
 class epoch_track(Callback):
     def __init__(self, params, param_filename):
@@ -263,7 +270,6 @@ def main():
                 if exists(MODEL_DIR + "latents.h5"):
                     remove(MODEL_DIR + "latents.h5")
 
-		
                 if args.gen:
                     print("Using generator for data!")
                     model.autoencoder.fit_generator(gen.train_data, None,
