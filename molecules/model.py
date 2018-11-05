@@ -145,7 +145,7 @@ class Transformer:
 
     def compile_vae(self, optimizer='adam', active_layers=999):
         src_seq_input = Input(shape=(None,), dtype='int32')
-        tgt_seq_input = Input(shape=(None,), dtype='int32')
+        tgt_seq_input = src_seq_input #Input(shape=(None,), dtype='int32')
 
         src_seq = src_seq_input
         tgt_seq = Lambda(lambda x: x[:, :-1])(tgt_seq_input)
@@ -194,21 +194,21 @@ class Transformer:
         self.ppl = Lambda(K.exp)(loss)
         self.accu = Lambda(get_accu)([final_output, tgt_true])
 
-        self.autoencoder = Model([src_seq_input, tgt_seq_input], loss)
+        self.autoencoder = Model(src_seq_input, loss)
         self.autoencoder.add_loss([loss])
 
         # For property prediction
         self.property_predictor = Model(encoded_input, prop_output)
 
         # For outputting next symbol
-        self.output_model = Model([src_seq_input, tgt_seq_input], final_output)
+        self.output_model = Model(src_seq_input, final_output)
 
         # For encoding to z
-        self.output_latent = Model([src_seq_input, tgt_seq_input], enc_output)
+        self.output_latent = Model(src_seq_input, enc_output)
 
         # For getting attentions
         attn_list = enc_attn + dec_attn + encdec_attn
-        self.output_attns = Model([src_seq_input, tgt_seq_input], attn_list)
+        self.output_attns = Model(src_seq_input, attn_list)
         self.autoencoder.compile(optimizer, None)
         self.autoencoder.metrics_names.append('ppl')
         self.autoencoder.metrics_tensors.append(self.ppl)
