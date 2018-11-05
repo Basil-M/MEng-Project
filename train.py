@@ -70,6 +70,7 @@ def get_arguments():
     parser.add_argument('--model_arch', type=str, metavar='N', default=MODEL_ARCH,
                         help='Model architecture to use - options are VAE, ATTN and ATTN_ID')
 
+    parser.add_argument('--gen', help='Whether to use generator for data')
     ### MODEL PARAMETERS
     parser.add_argument('--latent_dim', type=int, metavar='N', default=default.get("latent_dim"),
                         help='Dimensionality of the latent representation.')
@@ -151,11 +152,14 @@ def main():
         params.set("d_file", args.data)
         d_file = args.data
         tokens = dd.MakeSmilesDict(d_file, dict_file=d_file.replace('.txt', '_dict.txt'))
-        # data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
-                                                                           # h5_file=d_file.replace('.txt', '_data.h5'))
-        _,_, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
-                                                                           h5_file=d_file.replace('.txt', '_data.h5'))
-        gen = dd.SMILESgen(d_file.replace('.txt', '_data.h5'), args.batch_size)
+        if args.gen:
+            _, _, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
+                                                              h5_file=d_file.replace('.txt', '_data.h5'))
+            gen = dd.SMILESgen(d_file.replace('.txt', '_data.h5'), args.batch_size)
+        else:
+            data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
+                                                                               h5_file=d_file.replace('.txt', '_data.h5'))
+
 
 
         # Set up model
@@ -255,16 +259,17 @@ def main():
                 if exists(MODEL_DIR + "latents.h5"):
                     remove(MODEL_DIR + "latents.h5")
 
-
-                model.autoencoder.fit_generator(gen.train_data, None,
-                                                epochs=args.epochs, initial_epoch=current_epoch-1,
-                                                validation_data=gen.test_data,
-                                                callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback,
-                                                           ep_track])
-                # model.autoencoder.fit(data_train, None, batch_size=args.batch_size,
-                #                       epochs=args.epochs, initial_epoch=current_epoch - 1,
-                #                       validation_data=(data_test, None),
-                #                       callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback, ep_track])
+                if args.gen:
+                    model.autoencoder.fit_generator(gen.train_data, None,
+                                                    epochs=args.epochs, initial_epoch=current_epoch-1,
+                                                    validation_data=gen.test_data,
+                                                    callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback,
+                                                               ep_track])
+                else:
+                    model.autoencoder.fit(data_train, None, batch_size=args.batch_size,
+                                          epochs=args.epochs, initial_epoch=current_epoch - 1,
+                                          validation_data=(data_test, None),
+                                          callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback, ep_track])
 
             print("Autoencoder training complete. Loading best model.")
             model.autoencoder.load_weights(MODEL_DIR + "best_model.h5")
