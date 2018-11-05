@@ -21,7 +21,7 @@ DATA = 'data/zinc_10k.txt'
 MODEL_ARCH = 'ATTN_ID'
 MODEL_NAME = 'attn'
 MODEL_DIR = 'models/'
-MODEL_NAME = 'latent_test6'
+MODEL_NAME = 'latent_test2'
 
 
 ###################################
