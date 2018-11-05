@@ -26,7 +26,9 @@ class SMILES_data(Sequence):
     def __init__(self, data, batch_size, shuffle=True):
         self.data = data
         self.bs = batch_size
-        self.indices = range(len(self.data))
+        self.indices = list(range(len(self.data)))
+        if shuffle:
+            np.random.shuffle(self.indices)
         self.ind = 0
         self.shuffle = shuffle
 
@@ -35,8 +37,9 @@ class SMILES_data(Sequence):
 
     def __getitem__(self, idx):
         self.ind += self.bs
-        s = np.array(self.data[self.indices[self.ind - self.bs:self.ind]])
-        return s, None
+        inds = self.indices[self.ind - self.bs:self.ind]
+        inds = np.sort(inds).tolist()
+        return np.array(self.data[inds]), None
 
     def on_epoch_end(self):
         self.ind = 0
@@ -75,16 +78,16 @@ class AttnParams:
             "current_epoch": 1,
             "epochs": 50,
             "ae_trained": False,
-            "batch_size": 64,
+            "batch_size": 10,
             "len_limit": 120,
-            "d_model": 64,
+            "d_model": 32,
             "d_inner_hid": 128,
             "n_head": 8,
             "d_k": 8,
             "d_v": 8,
-            "layers": 3,
+            "layers": 1,
             "dropout": 0.1,
-            "latent_dim": 96, #64
+            "latent_dim": 32, #64
             "epsilon": 1,
             "pp_epochs": 15,
             "pp_layers": 3,

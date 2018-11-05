@@ -14,17 +14,24 @@ from os import mkdir, remove
 import dataloader as dd
 
 NUM_EPOCHS = 50
-BATCH_SIZE = 50
+BATCH_SIZE = 10
 LATENT_DIM = 128
 RANDOM_SEED = 1337
-DATA = 'data/zinc_10k.txt'
+DATA = 'data/zinc_1k.txt'
 MODEL_ARCH = 'ATTN_ID'
 MODEL_NAME = 'attn'
+MODEL_NAME = 'LT2'
 MODEL_DIR = 'models/'
-MODEL_NAME = 'latent_test2'
 
+## extra imports to set GPU options
+from tensorflow import ConfigProto, Session
+from keras.backend.tensorflow_backend import set_session
 
 ###################################
+# Prevent GPU pre-allocation
+config = ConfigProto()
+config.gpu_options.allow_growth = True
+set_session(Session(config=config))
 
 class epoch_track(Callback):
     def __init__(self, params, param_filename):
@@ -152,7 +159,7 @@ def main():
         params.set("d_file", args.data)
         d_file = args.data
         tokens = dd.MakeSmilesDict(d_file, dict_file=d_file.replace('.txt', '_dict.txt'))
-        if args.gen:
+        if not args.gen:
             _, _, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
                                                               h5_file=d_file.replace('.txt', '_data.h5'))
             gen = dd.SMILESgen(d_file.replace('.txt', '_data.h5'), args.batch_size)
@@ -259,7 +266,7 @@ def main():
                 if exists(MODEL_DIR + "latents.h5"):
                     remove(MODEL_DIR + "latents.h5")
 
-                if args.gen:
+                if not args.gen:
                     model.autoencoder.fit_generator(gen.train_data, None,
                                                     epochs=args.epochs, initial_epoch=current_epoch-1,
                                                     validation_data=gen.test_data,
