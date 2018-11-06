@@ -86,18 +86,18 @@ def get_arguments():
     ### MODEL PARAMETERS
     parser.add_argument('--latent_dim', type=int, metavar='N', default=default.get("latent_dim"),
                         help='Dimensionality of the latent representation.')
-    parser.add_argument('--ID_d_model', type=int, metavar='N', default=default.get("d_model"),
-                        help='Dimensionality of transformer model')
-    parser.add_argument('--ID_d_inner_hid', type=int, metavar='N', default=default.get("d_inner_hid"),
-                        help='Dimensionality of fully connected networks after attention layers')
-    parser.add_argument('--ID_d_k', type=int, metavar='N', default=default.get("d_k"),
-                        help='Dimensionality of attention keys')
-    parser.add_argument('--ID_d_v', type=int, metavar='N', default=default.get("d_v"),
-                        help='Dimensionality of attention values')
-    parser.add_argument('--ID_n_head', type=int, metavar='N', default=default.get("n_head"),
-                        help='Number of attention heads to use')
-    parser.add_argument('--ID_layers', type=int, metavar='N', default=default.get("layers"),
-                        help='Number of encoder/decoder layers')
+    parser.add_argument('--ID_d_model', type=int, metavar='N', default=default.get("ID_d_model"),
+                        help='Dimensionality of interim decoder model')
+    parser.add_argument('--ID_d_inner_hid', type=int, metavar='N', default=default.get("ID_d_inner_hid"),
+                        help='Dimensionality of interim decoder fully connected networks after attention layers')
+    parser.add_argument('--ID_d_k', type=int, metavar='N', default=default.get("ID_d_k"),
+                        help='Dimensionality of interim decoder attention keys')
+    parser.add_argument('--ID_d_v', type=int, metavar='N', default=default.get("ID_d_v"),
+                        help='Dimensionality of interim decoder attention values')
+    parser.add_argument('--ID_n_head', type=int, metavar='N', default=default.get("ID_n_head"),
+                        help='Number of interim decoder attention heads to use')
+    parser.add_argument('--ID_layers', type=int, metavar='N', default=default.get("ID_layers"),
+                        help='Number of interim decoder layers')
 
     ### MODEL PARAMETERS
     parser.add_argument('--d_model', type=int, metavar='N', default=default.get("d_model"),
