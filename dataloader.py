@@ -70,7 +70,6 @@ class SMILES(Sequence):
 
 class AttnParams:
     _params = None
-
     def __init__(self):
         self._training_params = ["current_epoch", "ae_trained"]
         self._params = {
@@ -85,9 +84,15 @@ class AttnParams:
             "n_head": 8,
             "d_k": 8,
             "d_v": 8,
-            "layers": 1,
+            "layers": 3,
             "dropout": 0.1,
             "latent_dim": 32, #64
+            "ID_d_model": 16,
+            "ID_d_inner_hid": 32,
+            "ID_n_head": 8,
+            "ID_d_k": 4,
+            "ID_d_v": 4,
+            "ID_layers": 1,
             "epsilon": 1,
             "pp_epochs": 15,
             "pp_layers": 3,

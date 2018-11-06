@@ -145,7 +145,7 @@ class Transformer:
 
     def compile_vae(self, optimizer='adam', active_layers=999):
         src_seq_input = Input(shape=(None,), dtype='int32')
-        tgt_seq_input = src_seq_input #Input(shape=(None,), dtype='int32')
+        tgt_seq_input = src_seq_input  # Input(shape=(None,), dtype='int32')
 
         src_seq = src_seq_input
         tgt_seq = Lambda(lambda x: x[:, :-1])(tgt_seq_input)
@@ -368,10 +368,17 @@ class TriTransformer:
                                          p.get("layers"), p.get("dropout"), stddev=p.get("epsilon"),
                                          latent_dim=p.get("latent_dim"), word_emb=i_word_emb, pos_emb=pos_emb)
 
-        self.latent_decoder = tr.RNNDecoder(self.d_model, p.get("d_inner_hid"),
-                                                p.get("n_head"), p.get("d_k"), p.get("d_v"),
-                                                p.get("layers"), p.get("dropout"), stddev=p.get("epsilon"),
-                                                latent_dim=p.get("latent_dim"), pos_emb=pos_emb)
+        # self.latent_decoder = tr.RNNDecoder(self.d_model, p.get("d_inner_hid"),
+        #                                     p.get("n_head"), p.get("d_k"), p.get("d_v"),
+        #                                     p.get("layers"), p.get("dropout"), stddev=p.get("epsilon"),
+        #                                     latent_dim=p.get("latent_dim"), pos_emb=pos_emb)
+
+        self.latent_decoder = tr.RNNDecoder(p.get("ID_d_model"), p.get("ID_d_inner_hid"),
+                                            p.get("ID_n_head"), p.get("ID_layers"),
+                                            p.get("ID_d_k"), p.get("ID_d_v"),
+                                            p.get("dropout"), stddev=p.get("epsilon"),
+                                            latent_dim=p.get("latent_dim"),
+                                            pos_emb=pos_emb)
 
         self.latent_to_decoder = tr.LatentToEmbedded(self.d_model,
                                                      latent_dim=p.get("latent_dim"),
@@ -395,7 +402,7 @@ class TriTransformer:
 
     def compile_vae(self, optimizer='adam', active_layers=999):
         src_seq_input = Input(shape=(None,), dtype='int32', name='src_seq_input')
-        tgt_seq_input = src_seq_input #Input(shape=(None,), dtype='int32', name='tgt_seq_input')
+        tgt_seq_input = src_seq_input  # Input(shape=(None,), dtype='int32', name='tgt_seq_input')
 
         src_seq = src_seq_input
         tgt_seq = Lambda(lambda x: x[:, :-1])(tgt_seq_input)
@@ -419,7 +426,6 @@ class TriTransformer:
         #     # z_mean = self.printer(z_mean)
 
         print("Finished setting up decoder.")
-
 
         dec_input = self.latent_to_decoder(z_mean, z_logvar)
         dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq,

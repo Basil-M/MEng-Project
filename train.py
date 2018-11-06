@@ -24,7 +24,7 @@ RANDOM_SEED = 1337
 DATA = 'data/zinc_1k.txt'
 MODEL_ARCH = 'ATTN_ID'
 MODEL_NAME = 'attn'
-MODEL_NAME = 'LT2'
+MODEL_NAME = 'LT9'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -82,9 +82,24 @@ def get_arguments():
                         help='Model architecture to use - options are VAE, ATTN and ATTN_ID')
 
     parser.add_argument('--gen', help='Whether to use generator for data')
+
     ### MODEL PARAMETERS
     parser.add_argument('--latent_dim', type=int, metavar='N', default=default.get("latent_dim"),
                         help='Dimensionality of the latent representation.')
+    parser.add_argument('--ID_d_model', type=int, metavar='N', default=default.get("d_model"),
+                        help='Dimensionality of transformer model')
+    parser.add_argument('--ID_d_inner_hid', type=int, metavar='N', default=default.get("d_inner_hid"),
+                        help='Dimensionality of fully connected networks after attention layers')
+    parser.add_argument('--ID_d_k', type=int, metavar='N', default=default.get("d_k"),
+                        help='Dimensionality of attention keys')
+    parser.add_argument('--ID_d_v', type=int, metavar='N', default=default.get("d_v"),
+                        help='Dimensionality of attention values')
+    parser.add_argument('--ID_n_head', type=int, metavar='N', default=default.get("n_head"),
+                        help='Number of attention heads to use')
+    parser.add_argument('--ID_layers', type=int, metavar='N', default=default.get("layers"),
+                        help='Number of encoder/decoder layers')
+
+    ### MODEL PARAMETERS
     parser.add_argument('--d_model', type=int, metavar='N', default=default.get("d_model"),
                         help='Dimensionality of transformer model')
     parser.add_argument('--d_inner_hid', type=int, metavar='N', default=default.get("d_inner_hid"),
@@ -97,6 +112,8 @@ def get_arguments():
                         help='Number of attention heads to use')
     parser.add_argument('--layers', type=int, metavar='N', default=default.get("layers"),
                         help='Number of encoder/decoder layers')
+
+
     parser.add_argument('--dropout', type=float, metavar='0.1', default=default.get("dropout"),
                         help='Dropout to use in autoencoder')
     parser.add_argument('--epsilon', type=float, metavar='0.01', default=default.get("epsilon"),
