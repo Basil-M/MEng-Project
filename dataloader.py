@@ -84,15 +84,16 @@ class AttnParams:
             "n_head": 8,
             "d_k": 8,
             "d_v": 8,
-            "layers": 3,
+            "layers": 2,
             "dropout": 0.1,
-            "latent_dim": 32, #64
+            "latent_dim": 25, #64
             "ID_d_model": 16,
             "ID_d_inner_hid": 32,
             "ID_n_head": 8,
             "ID_d_k": 4,
             "ID_d_v": 4,
             "ID_layers": 1,
+            "ID_width": 4,
             "epsilon": 1,
             "pp_epochs": 15,
             "pp_layers": 3,

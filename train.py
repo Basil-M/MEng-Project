@@ -24,7 +24,7 @@ RANDOM_SEED = 1337
 DATA = 'data/zinc_1k.txt'
 MODEL_ARCH = 'ATTN_ID'
 MODEL_NAME = 'attn'
-MODEL_NAME = 'LT'
+MODEL_NAME = 'LT4'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -97,6 +97,8 @@ def get_arguments():
     parser.add_argument('--ID_n_head', type=int, metavar='N', default=default.get("ID_n_head"),
                         help='Number of interim decoder attention heads to use')
     parser.add_argument('--ID_layers', type=int, metavar='N', default=default.get("ID_layers"),
+                        help='Number of interim decoder layers')
+    parser.add_argument('--ID_width', type=int, metavar='N', default=default.get("ID_width"),
                         help='Number of interim decoder layers')
 
     ### MODEL PARAMETERS
@@ -204,7 +206,8 @@ def main():
         param_filename = MODEL_DIR + "params.pkl"
         loaded_params = dd.AttnParams()
         if not exists(param_filename):
-            print("New model - params didn't exist.")
+            print("Starting new model {} with params:".format(args.model))
+            params.dump()
             params.save(param_filename)
         else:
             loaded_params.load(param_filename)

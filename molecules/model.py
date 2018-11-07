@@ -374,7 +374,7 @@ class TriTransformer:
         #                                     latent_dim=p.get("latent_dim"), pos_emb=pos_emb)
         self.latent_decoder = tr.RNNDecoder(p.get("ID_d_model"), p.get("ID_d_inner_hid"),
                                             p.get("ID_n_head"), p.get("ID_d_k"), p.get("ID_d_v"),
-                                            p.get("ID_layers"), p.get("dropout"),
+                                            p.get("ID_layers"), p.get("ID_width"), p.get("dropout"),
                                             stddev=p.get("epsilon"),
                                             latent_dim=p.get("latent_dim"),
                                             pos_emb=pos_emb)

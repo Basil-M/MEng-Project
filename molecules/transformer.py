@@ -301,17 +301,19 @@ class InterimEncoder():
 
 class RNNDecoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
-                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=1):
+                 layers=6, decoder_width=1, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=1):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
 
         if latent_dim is None: latent_dim = d_model  # no bottleneck
 
+        self.decoder_width = decoder_width
         self.latent_embedder = Dense(d_model, activation='linear', name='latent_embedder')
         self.latent_dim = latent_dim
-        self.mean_layer = Dense(1, input_shape=(d_model * latent_dim,), name='mean_layer')
-        self.logvar_layer = Dense(1, input_shape=(d_model * latent_dim,), name='logvar_layer')
+        self.mean_layer = Dense(decoder_width, input_shape=(d_model * latent_dim,), name='mean_layer')
+        self.first_sample = Dense(1, input_shape=(decoder_width,), name='first_iter')
+        self.logvar_layer = Dense(decoder_width, input_shape=(d_model * latent_dim,), name='logvar_layer')
         self.conc_layer = Concatenate(axis=1, name='concat')
 
         # Sample from the means/variances decoded so far
@@ -326,7 +328,7 @@ class RNNDecoder():
             return K.expand_dims(args, axis=2)
 
         def collapse_dims(arg):
-            return K.reshape(arg, [K.shape(arg)[0], 1])
+            return K.reshape(arg, [K.shape(arg)[0], decoder_width])
             # return K.squeeze(arg, axis=-1)
 
         def pad_with_zeros(arg):
@@ -348,6 +350,13 @@ class RNNDecoder():
         self.resh = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))
         self.ldim = K.constant(self.latent_dim, dtype='int32')
 
+        def print_shape(arg):
+            s = K.shape(arg)
+            s = K.print_tensor(s, "SHAPE OF {}: ".format(arg.name))
+            return K.reshape(arg, s)
+
+        self.pr = Lambda(print_shape)
+
     def __call__(self, src_seq, enc_output):
         mean_init, var_init = self.first_iter(src_seq, enc_output)
 
@@ -359,9 +368,18 @@ class RNNDecoder():
                                                                      src_seq.get_shape(),
                                                                      enc_output.get_shape()],
                                                    parallel_iterations=32)
+
+            # print("Latent dim:\t{}\nDecoder width:\t{}".format(self.latent_dim, self.decoder_width))
+            if (self.latent_dim - 1)%self.decoder_width != 0:
+            #     print("Chopping latent vectors!")
+                z_mean = z_mean[:, -self.latent_dim:]
+                z_logvar = z_logvar[:, -self.latent_dim:]
+
             return [z_mean, z_logvar]
 
         return Lambda(the_loop)([mean_init, var_init])
+
+
 
     def first_iter(self, src_seq, enc_output, return_att=False, active_layers=999):
         print("Setting up first decoder iteration")
@@ -391,40 +409,22 @@ class RNNDecoder():
                 self_atts.append(self_att)
                 enc_atts.append(enc_att)
 
-        # z = self.shapeprinter(z)
-
-        # mean1 = self.mean_layer(z)
-        # mean1 = self.shapeprinter(mean1)
-        # mean2 = self.mean_layer(mean1)
-        # mean2 = self.shapeprinter(mean2)
-        # output_mean = self.squeeze(mean2)
-        # output_mean = self.shapeprinter(output_mean)
-
-        # output_mean = self.squeeze(self.mean_layer2(self.mean_layer(z)))
-        # output_logvar = self.squeeze(self.logvar_layer2(self.logvar_layer(z)))
         z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))(z)
         output_mean = self.mean_layer(z)
         output_mean = self.squeeze(output_mean)
+        output_mean = self.first_sample(output_mean)
+
         output_logvar = self.logvar_layer(z)
         output_logvar = self.squeeze(output_logvar)
+        output_logvar = self.first_sample(output_logvar)
 
         return (output_mean, output_logvar, self_atts, enc_atts) if return_att else (output_mean, output_logvar)
-        #
-        # mean_init = self.init(enc_output)
-        # logvar_init = self.init(enc_output)
-        # s = tf.scan(self.step,
-        #             elems=np.ones([self.latent_dim]),
-        #             initializer=[mean_init, logvar_init])
-        # return s
 
     def cond(self, mean_so_far, logvar_so_far, src_seq, enc_output):
         # Return true while mean length is less than latent dim
         return tf.less(K.shape(mean_so_far)[1], self.ldim)
 
     def step(self, mean_so_far, logvar_so_far, src_seq, enc_output):
-        # mean_so_far, logvar_so_far = z_prev
-        # src_seq, enc_output = self.src_seq, self.enc_output
-
         sampled_z = self.sampler([mean_so_far, logvar_so_far])
 
         # Should be vector of size [batch_size, latent_dim]
@@ -448,7 +448,7 @@ class RNNDecoder():
         logvar_k = self.squeeze(self.logvar_layer(z))
         mean_so_far = self.conc_layer([mean_so_far, mean_k])
         logvar_so_far = self.conc_layer([logvar_so_far, logvar_k])
-
+        # mean_so_far = self.pr(mean_so_far)
         return [mean_so_far, logvar_so_far, src_seq, enc_output]
 
 
@@ -527,17 +527,6 @@ class InterimDecoder():
                 self_atts.append(self_att)
                 enc_atts.append(enc_att)
 
-        # z = self.shapeprinter(z)
-
-        # mean1 = self.mean_layer(z)
-        # mean1 = self.shapeprinter(mean1)
-        # mean2 = self.mean_layer(mean1)
-        # mean2 = self.shapeprinter(mean2)
-        # output_mean = self.squeeze(mean2)
-        # output_mean = self.shapeprinter(output_mean)
-
-        # output_mean = self.squeeze(self.mean_layer2(self.mean_layer(z)))
-        # output_logvar = self.squeeze(self.logvar_layer2(self.logvar_layer(z)))
         z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))(z)
         output_mean = self.mean_layer(z)
         output_mean = self.squeeze(output_mean)
@@ -570,13 +559,9 @@ class InterimDecoder():
 
         for dec_layer in self.layers[:active_layers]:
             z, self_att, enc_att = dec_layer(z, enc_output, self_mask, enc_mask)
-            # z = Lambda(lambda z: K.print_tensor(z, "\tINTERIM Z: "))(z)
             if return_att:
                 self_atts.append(self_att)
                 enc_atts.append(enc_att)
-
-        # mean_k = self.squeeze(self.mean_layer2(self.mean_layer(z)))
-        # logvar_k = self.squeeze(self.logvar_layer2(self.logvar_layer(z)))
 
         z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))(z)
         mean_k = self.squeeze(self.mean_layer(z))
