@@ -383,8 +383,8 @@ class TriTransformer:
                                                      latent_dim=p.get("latent_dim"),
                                                      stddev=p.get("epsilon"))
 
-        self.decoder = tr.Decoder(self.d_model, p.get("d_inner_hid"), p.get("n_head"), p.get("d_k"), p.get("d_v"),
-                                  p.get("layers"), p.get("dropout"), latent_dim=None,
+        self.decoder = tr.DecoderFromInterim(self.d_model, p.get("d_inner_hid"), p.get("n_head"), p.get("d_k"), p.get("d_v"),
+                                  p.get("layers"), p.get("dropout"),
                                   word_emb=o_word_emb, pos_emb=pos_emb)
         self.target_layer = TimeDistributed(Dense(o_tokens.num(), use_bias=False))
         self.printer = Lambda(self.print_shape)
@@ -426,10 +426,10 @@ class TriTransformer:
 
         print("Finished setting up decoder.")
 
-        dec_input = self.latent_to_decoder(z_mean, z_logvar)
+        z_sampled, dec_input = self.latent_to_decoder(z_mean, z_logvar)
         dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq,
                                                          tgt_pos,
-                                                         src_seq,
+                                                         z_sampled,
                                                          dec_input,
                                                          active_layers=active_layers,
                                                          return_att=True)
@@ -449,13 +449,11 @@ class TriTransformer:
             mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
             loss = tf.reduce_sum(loss * mask, -1) / tf.reduce_sum(mask, -1)
             reconstruction_loss = K.mean(loss)
-            # reconstruction_loss = K.print_tensor(reconstruction_loss, "RECONSTRUCTION_LOSS:")
 
-            # z_mean_ = K.print_tensor(z_mean_, "Z_MEAN_: ")
-            # z_log_var_ = K.print_tensor(z_log_var_, "Z_LOG_VAR_: ")
-            kl_loss = - 0.5 * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_))
-            # kl_loss = self.print_shape(kl_loss)
-            # kl_loss = K.print_tensor(kl_loss, "KL_LOSS")
+            s = K.shape(z_log_var_)
+            z_log_var_ = K.reshape(z_log_var_, s)
+
+            kl_loss = - 0.5 * tf.reduce_sum(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_), name='KL_loss_sum')
             return reconstruction_loss + kl_loss
 
         def get_accu(args):

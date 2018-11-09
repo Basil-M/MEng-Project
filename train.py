@@ -271,7 +271,7 @@ def main():
                                  update_freq='batch')
 
         model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
-        model.autoencoder.summary()
+        # model.autoencoder.summary()
         try:
                 model.autoencoder.load_weights(MODEL_DIR + "model.h5")
         except:

@@ -350,12 +350,12 @@ class RNNDecoder():
         self.resh = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))
         self.ldim = K.constant(self.latent_dim, dtype='int32')
 
-        def print_shape(arg):
-            s = K.shape(arg)
-            s = K.print_tensor(s, "SHAPE OF {}: ".format(arg.name))
-            return K.reshape(arg, s)
-
-        self.pr = Lambda(print_shape)
+        # def print_shape(arg):
+        #     s = K.shape(arg)
+        #     s = K.print_tensor(s, "SHAPE OF {}: ".format(arg.name))
+        #     return K.reshape(arg, s)
+        #
+        # self.pr = Lambda(print_shape)
 
     def __call__(self, src_seq, enc_output):
         mean_init, var_init = self.first_iter(src_seq, enc_output)
@@ -577,25 +577,24 @@ class LatentToEmbedded():
         self.expander_layer = Dense(d_model, input_shape=(1,))
         self.stddev = stddev
         self.latent_dim = latent_dim
-        self.cheating = Dense(latent_dim)
+        # self.cheating = Dense(latent_dim)
 
         def sampling(args):
             z_mean_, z_logvar_ = args
             batch_size = K.shape(z_mean_)[0]
             epsilon = K.random_normal(shape=(batch_size, self.latent_dim), mean=0., stddev=self.stddev)
-            return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, self.latent_dim, 1])
+            return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, self.latent_dim])
 
         self.sampler = Lambda(sampling, name='LatentToEmbeddingSampler')
 
     def __call__(self, z_mean, z_logvar):
         # Sample from the means/variances decoded so far
         sampled_z = self.sampler([z_mean, z_logvar])
-        K.print_tensor(sampled_z, "SAMPLED_Z = ")
 
-        expanded_z = self.expander_layer(self.cheating(sampled_z))
-        K.print_tensor(expanded_z, "EXPANDED_Z = ")
+        expanded_z = self.expander_layer(Lambda(K.expand_dims)(sampled_z))
 
-        return expanded_z  # self.expander_layer(sampled_z)
+
+        return sampled_z, expanded_z  # self.expander_layer(sampled_z)
 
 
 class DecoderFromInterim():
@@ -604,6 +603,12 @@ class DecoderFromInterim():
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
+        def print_shape(arg):
+            s = K.shape(arg)
+            s = K.print_tensor(s, "SHAPE OF {}: ".format(arg.name))
+            return K.reshape(arg, s)
+
+        self.pr = Lambda(print_shape)
 
     def __call__(self, tgt_seq, tgt_pos, src_seq, enc_output, return_att=False, active_layers=999):
 
@@ -611,16 +616,18 @@ class DecoderFromInterim():
         pos = self.pos_layer(tgt_pos)
         x = Add()([dec, pos])
 
-        self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(tgt_seq)
-        self_sub_mask = Lambda(GetSubMask)(tgt_seq)
-        self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
+        self_pad_mask = Lambda(lambda x: GetPadMask(x, x), name='DecoderPadMask')(tgt_seq)
+        self_sub_mask = Lambda(GetSubMask, name='DecoderSubMask')(tgt_seq)
+        self_mask = Lambda(lambda x: K.minimum(x[0], x[1]), name='DecoderSelfMask')([self_pad_mask, self_sub_mask])
 
-        enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([tgt_seq, src_seq])
-
+        enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]), name='DecoderEncMask')([tgt_seq, src_seq])
+        # self_mask = None
+        # enc_mask = None
         if return_att: self_atts, enc_atts = [], []
 
         for dec_layer in self.layers[:active_layers]:
             x, self_att, enc_att = dec_layer(x, enc_output, self_mask, enc_mask)
+
             if return_att:
                 self_atts.append(self_att)
                 enc_atts.append(enc_att)
@@ -638,6 +645,8 @@ class Decoder():
             self.bridge = Dense(d_model, input_shape=(latent_dim,))
         else:
             self.bridge = None
+
+
 
     def __call__(self, tgt_seq, tgt_pos, src_seq, enc_output, return_att=False, active_layers=999):
         if self.bridge is not None:
