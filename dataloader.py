@@ -79,14 +79,14 @@ class AttnParams:
             "ae_trained": False,
             "batch_size": 10,
             "len_limit": 120,
-            "d_model": 64,
+            "d_model": 32,
             "d_inner_hid": 256,
             "n_head": 8,
             "d_k": 8,
             "d_v": 8,
             "layers": 3,
             "dropout": 0.1,
-            "latent_dim": 128, #64
+            "latent_dim": 64, #64
             "ID_d_model": 16,
             "ID_d_inner_hid": 32,
             "ID_n_head": 8,
@@ -98,7 +98,7 @@ class AttnParams:
             "pp_epochs": 15,
             "pp_layers": 3,
             "model_arch": "ATTN_ID",
-            "bottleneck": "interim_decoder"
+            "bottleneck": "average"
         }
 
 

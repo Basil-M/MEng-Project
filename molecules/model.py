@@ -350,6 +350,7 @@ class TriTransformer:
         self.src_loc_info = True
         self.d_model = p.get("d_model")
         self.decode_model = None
+        self.bottleneck = p.get("bottleneck")
         if p.get("latent_dim") is None:
             self.latent_dim = p.get("d_model")
         else:
@@ -416,7 +417,10 @@ class TriTransformer:
                                             return_att=True)
 
         # z_pos = Lambda(self.get_pos_seq)(src_seq)
-        z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
+        if self.bottleneck == "average":
+            z_mean, z_logvar = self.encoder_to_latent(enc_output)
+        else:
+            z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
         print("Finished setting up decoder.")
 
         z_sampled, dec_input = self.latent_to_decoder(z_mean, z_logvar)
