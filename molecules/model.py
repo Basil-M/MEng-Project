@@ -359,7 +359,6 @@ class TriTransformer:
 
         pos_emb = tr.Embedding(self.len_limit, d_emb, trainable=False,
                                weights=[tr.GetPosEncodingMatrix(self.len_limit, d_emb)])
-
         i_word_emb = tr.Embedding(i_tokens.num(), d_emb)
         o_word_emb = i_word_emb
 
@@ -368,24 +367,24 @@ class TriTransformer:
                                          p.get("layers"), p.get("dropout"), stddev=p.get("epsilon"),
                                          latent_dim=p.get("latent_dim"), word_emb=i_word_emb, pos_emb=pos_emb)
 
-        # self.latent_decoder = tr.RNNDecoder(self.d_model, p.get("d_inner_hid"),
-        #                                     p.get("n_head"), p.get("d_k"), p.get("d_v"),
-        #                                     p.get("layers"), p.get("dropout"), stddev=p.get("epsilon"),
-        #                                     latent_dim=p.get("latent_dim"), pos_emb=pos_emb)
-        self.latent_decoder = tr.RNNDecoder(p.get("ID_d_model"), p.get("ID_d_inner_hid"),
-                                            p.get("ID_n_head"), p.get("ID_d_k"), p.get("ID_d_v"),
-                                            p.get("ID_layers"), p.get("ID_width"), p.get("dropout"),
-                                            stddev=p.get("epsilon"),
-                                            latent_dim=p.get("latent_dim"),
-                                            pos_emb=pos_emb)
+        if p.get("bottleneck") == "average":
+            self.encoder_to_latent = tr.AvgLatent(p.get("d_model"), p.get("latent_dim"))
+        elif p.get("bottleneck") == "interim_decoder":
+            latent_pos_emb = tr.Embedding(p.get("latent_dim"), p.get("ID_d_model"),trainable=True)
+            self.encoder_to_latent = tr.RNNDecoder(p.get("ID_d_model"), p.get("ID_d_inner_hid"),
+                                                   p.get("ID_n_head"), p.get("ID_d_k"), p.get("ID_d_v"),
+                                                   p.get("ID_layers"), p.get("ID_width"), p.get("dropout"),
+                                                   stddev=p.get("epsilon"),
+                                                   latent_dim=p.get("latent_dim"),
+                                                   pos_emb=latent_pos_emb)
 
         self.latent_to_decoder = tr.LatentToEmbedded(self.d_model,
                                                      latent_dim=p.get("latent_dim"),
                                                      stddev=p.get("epsilon"))
 
-        self.decoder = tr.DecoderFromInterim(self.d_model, p.get("d_inner_hid"), p.get("n_head"), p.get("d_k"), p.get("d_v"),
-                                  p.get("layers"), p.get("dropout"),
-                                  word_emb=o_word_emb, pos_emb=pos_emb)
+        self.decoder = tr.DecoderFromLatent(self.d_model, p.get("d_inner_hid"), p.get("n_head"), p.get("d_k"), p.get("d_v"),
+                                            p.get("layers"), p.get("dropout"),
+                                            word_emb=o_word_emb, pos_emb=pos_emb)
         self.target_layer = TimeDistributed(Dense(o_tokens.num(), use_bias=False))
         self.printer = Lambda(self.print_shape)
 
@@ -416,14 +415,8 @@ class TriTransformer:
                                             active_layers=active_layers,
                                             return_att=True)
 
-        z_mean, z_logvar = self.latent_decoder(src_seq, enc_output)
-        # z_mean, z_logvar = self.latent_decoder.first_iter(src_seq, enc_output)
-        # # z_mean = self.printer(z_mean)
-        # for k in range(self.latent_dim - 1):
-        #     print("Setting up decoder iteration {}".format(k+2))
-        #     z_mean, z_logvar = self.latent_decoder(src_seq, enc_output, z_mean, z_logvar)
-        #     # z_mean = self.printer(z_mean)
-
+        # z_pos = Lambda(self.get_pos_seq)(src_seq)
+        z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
         print("Finished setting up decoder.")
 
         z_sampled, dec_input = self.latent_to_decoder(z_mean, z_logvar)

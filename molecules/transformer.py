@@ -219,13 +219,6 @@ class Encoder():
         else:
             self.latent_dim = latent_dim
 
-        # def pad_with_zeros(arg):
-        #     #input has shape [batch_size, len, d_model]
-        #     paddings = [[0,0], [0, K.constant(self.latent_dim, dtype='int32') - K.shape(arg)[1]], [0,0]]
-        #     return tf.pad(arg, paddings, 'CONSTANT', constant_values=0.0)
-        #
-        # self.padder = Lambda(pad_with_zeros)
-        # self.to_latent = Dense(self.latent_dim,input_shape=(d_model*120), name='z_mean', activation='linear')
         self.stddev = stddev
 
     def __call__(self, src_seq, src_pos, return_att=False, active_layers=999):
@@ -298,6 +291,15 @@ class InterimEncoder():
 
         return (h, atts) if return_att else h
 
+class AvgLatent():
+    def __init__(self, d_model, latent_dim):
+        self.avg = Lambda(lambda x: tf.reduce_sum(x, axis=1))
+        self.mean_layer = Dense(latent_dim, input_shape=(d_model,), name='mean_layer')
+        self.logvar_layer = Dense(latent_dim, input_shape=(d_model,), name='logvar_layer')
+
+    def __call__(self, encoder_output):
+        h = self.avg(encoder_output)
+        return self.mean_layer(h), self.logvar_layer(h)
 
 class RNNDecoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
@@ -390,16 +392,21 @@ class RNNDecoder():
 
         z_zero = Lambda(gen_zeros, name='z_zero')(enc_output)
         decoder_input = self.latent_embedder(self.expand(z_zero))
+
+
         z = decoder_input  # Add()([decoder_input, pos])
 
-        # z_zero = Reshape([-1, 1])(z_zero)
+        # Add positional encoding
+        z_pos = Lambda(self.get_pos_seq)(z_zero)
+        z_pos = self.pos_layer(z_pos)
+
+        z = Add()([z, z_pos])
+
         # Mask the output
         self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(z_zero)
         self_sub_mask = Lambda(GetSubMask)(z_zero)
         self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
         enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([z_zero, src_seq])
-        # self_mask = None
-        # enc_mask = None
 
         if return_att: self_atts, enc_atts = [], []
 
@@ -431,8 +438,13 @@ class RNNDecoder():
         sampled_z = self.pad_zeros(sampled_z)
 
         # Expand to matrix of size [batch_size, latent_dim, model_dim]
-        # z =
         z = self.latent_embedder(self.expand(sampled_z))
+
+        # Add positional encoding
+        z_pos = Lambda(self.get_pos_seq)(sampled_z)
+        z_pos = self.pos_layer(z_pos)
+
+        z = Add()([z, z_pos])
 
         # Mask the output
         self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(sampled_z)
@@ -451,125 +463,10 @@ class RNNDecoder():
         # mean_so_far = self.pr(mean_so_far)
         return [mean_so_far, logvar_so_far, src_seq, enc_output]
 
-
-class InterimDecoder():
-    def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
-                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=1):
-        self.emb_layer = word_emb
-        self.pos_layer = pos_emb
-        self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
-
-        if latent_dim is None: latent_dim = d_model  # no bottleneck
-
-        self.latent_embedder = Dense(d_model, activation='linear', name='latent_embedder')
-
-        self.latent_dim = latent_dim
-        self.stddev = stddev
-        self.mean_layer = Dense(1, input_shape=(d_model * latent_dim,), name='mean_layer')
-        self.logvar_layer = Dense(1, input_shape=(d_model * latent_dim,), name='logvar_layer')
-        # self.mean_layer2 = Dense(1, input_shape=(latent_dim,), name='mean2_layer')
-        # self.logvar_layer2 = Dense(1,input_shape=(latent_dim,), name='logvar2_layer')
-        self.conc_layer = Concatenate(axis=1, name='concat')
-
-        # Sample from the means/variances decoded so far
-        def sampling(args):
-            z_mean_, z_logvar_ = args
-            batch_size = K.shape(z_mean_)[0]
-            k = K.shape(z_mean_)[1]
-            epsilon = K.random_normal(shape=(batch_size, k), mean=0., stddev=self.stddev)
-            return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [-1, k])
-
-        def expand_dims(args):
-            return K.expand_dims(args, axis=2)
-
-        def collapse_dims(arg):
-            return K.reshape(arg, [K.shape(arg)[0], 1])
-            # return K.squeeze(arg, axis=-1)
-
-        def pad_with_zeros(arg):
-            paddings = [[0, 0], [0, K.constant(self.latent_dim, dtype='int32') - K.shape(arg)[1]]]
-            return tf.pad(arg, paddings, 'CONSTANT', constant_values=0.0)
-            # return K.zeros(
-            #     [K.shape(arg)[0], self.latent_dim - K.shape(arg)[1]],
-            #     dtype="float")
-
-        self.sampler = Lambda(sampling, name='InterimDecoderSampler')
-        self.expand = Lambda(expand_dims, name='DimExpander')
-        self.squeeze = Lambda(collapse_dims, name='DimCollapser')
-        self.pad_zeros = Lambda(pad_with_zeros, name='ZerosForPadding')
-        self.d_model = d_model
-
-    def first_iter(self, src_seq, enc_output, return_att=False, active_layers=999):
-        print("Setting up first decoder iteration")
-
-        def gen_zeros(sample_vec):
-            batch_size = K.shape(sample_vec)[0]
-            return tf.keras.backend.zeros([batch_size, self.latent_dim], dtype='float', name='zeros')
-
-        z_zero = Lambda(gen_zeros, name='z_zero')(enc_output)
-        decoder_input = self.latent_embedder(self.expand(z_zero))
-        z = decoder_input  # Add()([decoder_input, pos])
-
-        # z_zero = Reshape([-1, 1])(z_zero)
-        # Mask the output
-        self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(z_zero)
-        self_sub_mask = Lambda(GetSubMask)(z_zero)
-        self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
-        enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([z_zero, src_seq])
-        # self_mask = None
-        # enc_mask = None
-
-        if return_att: self_atts, enc_atts = [], []
-
-        for dec_layer in self.layers[:active_layers]:
-            z, self_att, enc_att = dec_layer(z, enc_output, self_mask, enc_mask)
-            if return_att:
-                self_atts.append(self_att)
-                enc_atts.append(enc_att)
-
-        z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))(z)
-        output_mean = self.mean_layer(z)
-        output_mean = self.squeeze(output_mean)
-        output_logvar = self.logvar_layer(z)
-        output_logvar = self.squeeze(output_logvar)
-
-        return (output_mean, output_logvar, self_atts, enc_atts) if return_att else (output_mean, output_logvar)
-
-    def __call__(self, src_seq, enc_output, mean_so_far=None, logvar_so_far=None, return_att=False, active_layers=999):
-        sampled_z = self.sampler([mean_so_far, logvar_so_far])
-
-        # Should be vector of size [batch_size, latent_dim]
-        # sampled_z = self.conc_layer([sampled_z, self.pad_zeros(sampled_z)])
-        sampled_z = self.pad_zeros(sampled_z)
-
-        # Expand to matrix of size [batch_size, latent_dim, model_dim]
-        decoder_input = self.latent_embedder(self.expand(sampled_z))
-
-        # Add positional encoding
-        # pos = self.pos_layer(decoder_input)
-        z = decoder_input  # Add()([decoder_input, pos])
-
-        # Mask the output
-        self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(sampled_z)
-        self_sub_mask = Lambda(GetSubMask)(sampled_z)
-        self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
-        enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([sampled_z, src_seq])
-
-        if return_att: self_atts, enc_atts = [], []
-
-        for dec_layer in self.layers[:active_layers]:
-            z, self_att, enc_att = dec_layer(z, enc_output, self_mask, enc_mask)
-            if return_att:
-                self_atts.append(self_att)
-                enc_atts.append(enc_att)
-
-        z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))(z)
-        mean_k = self.squeeze(self.mean_layer(z))
-        logvar_k = self.squeeze(self.logvar_layer(z))
-        output_mean = self.conc_layer([mean_so_far, mean_k])
-        output_logvar = self.conc_layer([logvar_so_far, logvar_k])
-
-        return (output_mean, output_logvar, self_atts, enc_atts) if return_att else (output_mean, output_logvar)
+    def get_pos_seq(self, x):
+        mask = K.cast(K.not_equal(x, 0), 'int32')
+        pos = K.cumsum(K.ones_like(x, 'int32'), 1)
+        return pos * mask
 
 
 class LatentToEmbedded():
@@ -597,7 +494,7 @@ class LatentToEmbedded():
         return sampled_z, expanded_z  # self.expander_layer(sampled_z)
 
 
-class DecoderFromInterim():
+class DecoderFromLatent():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
                  layers=6, dropout=0.1, word_emb=None, pos_emb=None):
         self.emb_layer = word_emb
@@ -681,7 +578,7 @@ class LRSchedulerPerStep(Callback):
 
     def on_batch_begin(self, batch, logs=None):
         self.step_num += 1
-        lr = self.basic * min(self.step_num ** -0.5, self.step_num * self.warm)
+        lr = 10*self.basic * min(self.step_num ** -0.5, self.step_num * self.warm)
         K.set_value(self.model.optimizer.lr, lr)
 
 

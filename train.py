@@ -18,13 +18,13 @@ k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
 NUM_EPOCHS = 50
-BATCH_SIZE = 10
+BATCH_SIZE = 32
 LATENT_DIM = 128
 RANDOM_SEED = 1337
-DATA = 'data/zinc_1k.txt'
+DATA = 'data/zinc_10k.txt'
 MODEL_ARCH = 'ATTN_ID'
 MODEL_NAME = 'attn'
-MODEL_NAME = 'LT4'
+MODEL_NAME = 'LT12'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -83,9 +83,11 @@ def get_arguments():
 
     parser.add_argument('--gen', help='Whether to use generator for data')
 
-    ### MODEL PARAMETERS
+    ### BOTTLENECK PARAMETERS
     parser.add_argument('--latent_dim', type=int, metavar='N', default=default.get("latent_dim"),
                         help='Dimensionality of the latent representation.')
+    parser.add_argument('--bottleneck', type=str, default=default.get("bottleneck"),
+                        help='Bottleneck architecture - average, interim_decoder')
     parser.add_argument('--ID_d_model', type=int, metavar='N', default=default.get("ID_d_model"),
                         help='Dimensionality of interim decoder model')
     parser.add_argument('--ID_d_inner_hid', type=int, metavar='N', default=default.get("ID_d_inner_hid"),
@@ -270,7 +272,10 @@ def main():
                                  write_images=True,
                                  update_freq='batch')
 
-        model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
+        # if args.bottleneck == "interim_decoder":
+        model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9 , clipnorm=1.0, clipvalue=0.5))
+        # else:
+        #     model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9)) #, clipnorm=1.0, clipvalue=0.5))
         # model.autoencoder.summary()
         try:
                 model.autoencoder.load_weights(MODEL_DIR + "model.h5")

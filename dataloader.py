@@ -79,14 +79,14 @@ class AttnParams:
             "ae_trained": False,
             "batch_size": 10,
             "len_limit": 120,
-            "d_model": 32,
-            "d_inner_hid": 128,
+            "d_model": 64,
+            "d_inner_hid": 256,
             "n_head": 8,
             "d_k": 8,
             "d_v": 8,
-            "layers": 2,
+            "layers": 3,
             "dropout": 0.1,
-            "latent_dim": 25, #64
+            "latent_dim": 128, #64
             "ID_d_model": 16,
             "ID_d_inner_hid": 32,
             "ID_n_head": 8,
@@ -94,11 +94,13 @@ class AttnParams:
             "ID_d_v": 4,
             "ID_layers": 1,
             "ID_width": 4,
-            "epsilon": 1,
+            "epsilon": 0.01,
             "pp_epochs": 15,
             "pp_layers": 3,
-            "model_arch": "ATTN",
+            "model_arch": "ATTN_ID",
+            "bottleneck": "interim_decoder"
         }
+
 
     def get(self, param):
         if param in self._params:
