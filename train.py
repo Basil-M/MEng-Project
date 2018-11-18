@@ -18,20 +18,20 @@ k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
 NUM_EPOCHS = 50
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 LATENT_DIM = 128
-RANDOM_SEED = 1337
-DATA = 'data/zinc_10k.txt'
+RANDOM_SEED = 45
+DATA = 'data/zinc_1k.txt'
 MODEL_ARCH = 'ATTN_ID'
 MODEL_NAME = 'attn'
-MODEL_NAME = 'LT2'
+MODEL_NAME = 'LT4'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
 from tensorflow import ConfigProto, Session
 from keras.backend.tensorflow_backend import set_session
 
-###################################
+###################################z
 # Prevent GPU pre-allocation
 config = ConfigProto()
 config.gpu_options.allow_growth = True
@@ -81,7 +81,7 @@ def get_arguments():
     parser.add_argument('--model_arch', type=str, metavar='N', default=MODEL_ARCH,
                         help='Model architecture to use - options are VAE, ATTN and ATTN_ID')
 
-    parser.add_argument('--gen', help='Whether to use generator for data')
+    parser.add_argument('--gen', help='Whether to use generator for data', default=True)
 
     ### BOTTLENECK PARAMETERS
     parser.add_argument('--latent_dim', type=int, metavar='N', default=default.get("latent_dim"),
@@ -273,7 +273,7 @@ def main():
                                  update_freq='batch')
 
         # if args.bottleneck == "interim_decoder":
-        model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9 , clipnorm=1.0, clipvalue=0.5))
+        model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9))#, clipnorm=1.0, clipvalue=0.5))
         # else:
         #     model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9)) #, clipnorm=1.0, clipvalue=0.5))
         # model.autoencoder.summary()
@@ -315,11 +315,11 @@ def main():
             # Try to load property training data
             if not exists(MODEL_DIR + "latents.h5"):
                 print("Generating latent representations from auto-encoder for property predictor training.")
-                z_train = model.output_latent.predict([data_train, data_train], 64)
-                z_test = model.output_latent.predict([data_test, data_test], 64)
-
-
-                s = z_train[0]
+                data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
+                                                                                   h5_file=d_file.replace('.txt',
+                                                                                                          '_data.h5'))
+                z_train = model.output_latent.predict([data_train], 64)
+                z_test = model.output_latent.predict([data_test], 64)
 
                 with h5py.File(MODEL_DIR + "latents.h5", 'w') as dfile:
                     dfile.create_dataset('z_test', data=z_test)

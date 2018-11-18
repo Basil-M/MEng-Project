@@ -46,28 +46,6 @@ class SMILES_data(Sequence):
         if self.shuffle:
             np.random.shuffle(self.indices)
 
-class SMILES(Sequence):
-    def __init__(self, data_filename, batch_size, partition='train', shuffle=True):
-        with h5py.File(data_filename,'r') as f:
-            self.data = f[partition]
-        self.bs = batch_size
-        self.ind = 0
-        self.shuffle = shuffle
-
-    def __len__(self):
-        return int(np.floor(len(self.data)/self.bs))
-
-    def __getitem__(self, idx):
-        s = self.data[self.ind-self.bs:self.ind]
-        return s
-
-    def on_epoch_end(self):
-        self.ind = 0
-        if self.shuffle:
-            indices = range(len(self.data))
-            np.random.shuffle(indices)
-            self.data = self.data[indices]
-
 class AttnParams:
     _params = None
     def __init__(self):
@@ -80,25 +58,25 @@ class AttnParams:
             "batch_size": 10,
             "len_limit": 120,
             "d_model": 32,
-            "d_inner_hid": 256,
+            "d_inner_hid": 128,
             "n_head": 8,
             "d_k": 8,
             "d_v": 8,
-            "layers": 3,
+            "layers": 1,
             "dropout": 0.1,
-            "latent_dim": 64, #64
+            "latent_dim": 128, #64
             "ID_d_model": 16,
             "ID_d_inner_hid": 32,
             "ID_n_head": 8,
             "ID_d_k": 4,
             "ID_d_v": 4,
             "ID_layers": 1,
-            "ID_width": 4,
+            "ID_width": 1,
             "epsilon": 0.01,
             "pp_epochs": 15,
             "pp_layers": 3,
             "model_arch": "ATTN_ID",
-            "bottleneck": "average"
+            "bottleneck": "interim_decoder"
         }
 
 

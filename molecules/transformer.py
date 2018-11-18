@@ -196,14 +196,14 @@ def GetPadMask(q, k):
 
 def GetSubMask(s):
     '''
-
-    :param s:
+    Returns a mask which hides future tokens thereby preserving decoder causality
+    :param s: Sequence of size [batch size, length]
     :return:
     '''
     len_s = tf.shape(s)[1]
     bs = tf.shape(s)[:1]
+    # creates lower triangular matrix
     mask = K.cumsum(tf.eye(len_s, batch_shape=bs), 1)
-    # mask = K.print_tensor(mask, "SUBMASK:")
     return mask
 
 
@@ -269,13 +269,6 @@ class InterimEncoder():
         self.pos_layer = pos_emb
         self.layers = [EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
 
-        if latent_dim is None:
-            self.latent_dim = d_model
-        else:
-            self.latent_dim = latent_dim
-
-        self.stddev = stddev
-
     def __call__(self, src_seq, src_pos, return_att=False, active_layers=999):
         h = self.emb_layer(src_seq)
 
@@ -284,6 +277,9 @@ class InterimEncoder():
             h = Add()([h, pos])
         if return_att: atts = []
         mask = Lambda(lambda x: GetPadMask(x, x))(src_seq)
+
+        pr2 = Lambda(lambda x: tf.Print(x, [x], "\nENCODER MASK: ", summarize=100))
+        # mask = pr2(mask)
         for enc_layer in self.layers[:active_layers]:
             h, att = enc_layer(h, mask)
             # h = Lambda(lambda z: K.print_tensor(z, "\n\nENCODING H: "))(h)
@@ -293,12 +289,22 @@ class InterimEncoder():
 
 class AvgLatent():
     def __init__(self, d_model, latent_dim):
+        n_layers = 2
+        self.layers = [Dense(d_model, input_shape=(d_model,), activation='relu') for _ in range(n_layers)]
+
+        # self.trans = Dense(d_model, input_shape=(d_model,))
+
         self.avg = Lambda(lambda x: tf.reduce_sum(x, axis=1))
+        self.after_avg = Dense(d_model, input_shape=(d_model,));
         self.mean_layer = Dense(latent_dim, input_shape=(d_model,), name='mean_layer')
         self.logvar_layer = Dense(latent_dim, input_shape=(d_model,), name='logvar_layer')
 
     def __call__(self, encoder_output):
-        h = self.avg(encoder_output)
+        h = encoder_output
+        for layer in self.layers:
+            h = layer(h)
+        h = self.avg(h)
+        h = self.after_avg(h)
         return self.mean_layer(h), self.logvar_layer(h)
 
 class RNNDecoder():
@@ -308,13 +314,16 @@ class RNNDecoder():
         self.pos_layer = pos_emb
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
 
-        if latent_dim is None: latent_dim = d_model  # no bottleneck
-
         self.decoder_width = decoder_width
         self.latent_embedder = Dense(d_model, activation='linear', name='latent_embedder')
         self.latent_dim = latent_dim
+
+        self.mean_layers = [Dense(d_model*latent_dim, input_shape=(d_model * latent_dim,), activation='relu') for _ in range(4)]
         self.mean_layer = Dense(decoder_width, input_shape=(d_model * latent_dim,), name='mean_layer')
+
         self.first_sample = Dense(1, input_shape=(decoder_width,), name='first_iter')
+
+        self.logvar_layers = [Dense(d_model*latent_dim, input_shape=(d_model * latent_dim,), activation='relu') for _ in range(4)]
         self.logvar_layer = Dense(decoder_width, input_shape=(d_model * latent_dim,), name='logvar_layer')
         self.conc_layer = Concatenate(axis=1, name='concat')
 
@@ -352,18 +361,13 @@ class RNNDecoder():
         self.resh = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))
         self.ldim = K.constant(self.latent_dim, dtype='int32')
 
-        # def print_shape(arg):
-        #     s = K.shape(arg)
-        #     s = K.print_tensor(s, "SHAPE OF {}: ".format(arg.name))
-        #     return K.reshape(arg, s)
-        #
-        # self.pr = Lambda(print_shape)
-
     def __call__(self, src_seq, enc_output):
         mean_init, var_init = self.first_iter(src_seq, enc_output)
 
         def the_loop(args):
             z_mean_, z_logvar_ = args
+
+            # use interim decoder to generate latent dimension iteratively
             z_mean, z_logvar, _, _ = tf.while_loop(self.cond, self.step, [z_mean_, z_logvar_, src_seq, enc_output],
                                                    shape_invariants=[tf.TensorShape([None, None]),
                                                                      tf.TensorShape([None, None]),
@@ -371,9 +375,9 @@ class RNNDecoder():
                                                                      enc_output.get_shape()],
                                                    parallel_iterations=32)
 
-            # print("Latent dim:\t{}\nDecoder width:\t{}".format(self.latent_dim, self.decoder_width))
+
+            # will generate too many latent dimensions, so clip it
             if (self.latent_dim - 1)%self.decoder_width != 0:
-            #     print("Chopping latent vectors!")
                 z_mean = z_mean[:, -self.latent_dim:]
                 z_logvar = z_logvar[:, -self.latent_dim:]
 
@@ -408,6 +412,12 @@ class RNNDecoder():
         self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
         enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([z_zero, src_seq])
 
+        pr = Lambda(lambda x: tf.Print(x, [x], "\nSELF_MASK: ", summarize=100))
+        # self_mask = pr(self_mask)
+
+        pr2 = Lambda(lambda x: tf.Print(x, [x], "\nINTERIM_ENCODER_MASK: ", summarize=100))
+        # enc_mask = pr2(enc_mask)
+
         if return_att: self_atts, enc_atts = [], []
 
         for dec_layer in self.layers[:active_layers]:
@@ -417,11 +427,19 @@ class RNNDecoder():
                 enc_atts.append(enc_att)
 
         z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))(z)
-        output_mean = self.mean_layer(z)
+        z_mean = z
+        z_logvar = z
+        for layer in self.mean_layers:
+            z_mean = layer(z_mean)
+
+        for layer in self.logvar_layers:
+            z_logvar = layer(z_logvar)
+
+        output_mean = self.mean_layer(z_mean)
         output_mean = self.squeeze(output_mean)
         output_mean = self.first_sample(output_mean)
 
-        output_logvar = self.logvar_layer(z)
+        output_logvar = self.logvar_layer(z_logvar)
         output_logvar = self.squeeze(output_logvar)
         output_logvar = self.first_sample(output_logvar)
 
@@ -445,19 +463,32 @@ class RNNDecoder():
         z_pos = self.pos_layer(z_pos)
 
         z = Add()([z, z_pos])
-
         # Mask the output
         self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(sampled_z)
         self_sub_mask = Lambda(GetSubMask)(sampled_z)
         self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
         enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([sampled_z, src_seq])
 
+        pr = Lambda(lambda x: tf.Print(x, [x], "\nID_SELF_MASK: ", summarize=100))
+        # self_mask = pr(self_mask)
+
+        pr2 = Lambda(lambda x: tf.Print(x, [x], "\nID_ENC_MASK: ", summarize=100))
+        # enc_mask = pr2(enc_mask)
+
         for dec_layer in self.layers:
             z, _, _ = dec_layer(z, enc_output, self_mask, enc_mask)
 
         z = self.resh(z)
-        mean_k = self.squeeze(self.mean_layer(z))
-        logvar_k = self.squeeze(self.logvar_layer(z))
+        z_mean = z
+        z_logvar = z
+        for layer in self.mean_layers:
+            z_mean = layer(z_mean)
+
+        for layer in self.logvar_layers:
+            z_logvar = layer(z_logvar)
+
+        mean_k = self.squeeze(self.mean_layer(z_mean))
+        logvar_k = self.squeeze(self.logvar_layer(z_logvar))
         mean_so_far = self.conc_layer([mean_so_far, mean_k])
         logvar_so_far = self.conc_layer([logvar_so_far, logvar_k])
         # mean_so_far = self.pr(mean_so_far)
@@ -518,8 +549,12 @@ class DecoderFromLatent():
         self_mask = Lambda(lambda x: K.minimum(x[0], x[1]), name='DecoderSelfMask')([self_pad_mask, self_sub_mask])
 
         enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]), name='DecoderEncMask')([tgt_seq, src_seq])
-        # self_mask = None
-        # enc_mask = None
+
+        pr = Lambda(lambda x: tf.Print(x, [x], "\nDECODER ENC_MASK: ", summarize=100))
+        # enc_mask = pr(enc_mask)
+
+        pr2 = Lambda(lambda x: tf.Print(x, [x], "\nDECODER SELF_MASK: ", summarize=100))
+        # self_mask= pr2(self_mask)
         if return_att: self_atts, enc_atts = [], []
 
         for dec_layer in self.layers[:active_layers]:

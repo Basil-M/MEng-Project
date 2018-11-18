@@ -371,7 +371,7 @@ class TriTransformer:
         if p.get("bottleneck") == "average":
             self.encoder_to_latent = tr.AvgLatent(p.get("d_model"), p.get("latent_dim"))
         elif p.get("bottleneck") == "interim_decoder":
-            latent_pos_emb = tr.Embedding(p.get("latent_dim"), p.get("ID_d_model"),trainable=True)
+            latent_pos_emb = tr.Embedding(p.get("latent_dim"), p.get("ID_d_model"), trainable=True)
             self.encoder_to_latent = tr.RNNDecoder(p.get("ID_d_model"), p.get("ID_d_inner_hid"),
                                                    p.get("ID_n_head"), p.get("ID_d_k"), p.get("ID_d_v"),
                                                    p.get("ID_layers"), p.get("ID_width"), p.get("dropout"),
@@ -447,10 +447,9 @@ class TriTransformer:
             loss = tf.reduce_sum(loss * mask, -1) / tf.reduce_sum(mask, -1)
             reconstruction_loss = K.mean(loss)
 
-            s = K.shape(z_log_var_)
-            z_log_var_ = K.reshape(z_log_var_, s)
-
-            kl_loss = - 0.5 * tf.reduce_sum(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_), name='KL_loss_sum')
+            # z_mean_ = tf.Print(z_mean_, [z_mean_], "\nz_mean_: ", summarize=1000)
+            # z_log_var_ = tf.Print(z_log_var_, [z_log_var_], "\nz_log_var_: ", summarize=1000)
+            kl_loss = - 0.5 * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_), name='KL_loss_sum')
             return reconstruction_loss + kl_loss
 
         def get_accu(args):
