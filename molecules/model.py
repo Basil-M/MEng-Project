@@ -449,7 +449,7 @@ class TriTransformer:
 
             # z_mean_ = tf.Print(z_mean_, [z_mean_], "\nz_mean_: ", summarize=1000)
             # z_log_var_ = tf.Print(z_log_var_, [z_log_var_], "\nz_log_var_: ", summarize=1000)
-            kl_loss = - 0.5 * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_), name='KL_loss_sum')
+            kl_loss = - 0.5 * tf.reduce_sum(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_), name='KL_loss_sum')
             return reconstruction_loss + kl_loss
 
         def get_accu(args):
