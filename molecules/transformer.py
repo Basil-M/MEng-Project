@@ -508,9 +508,9 @@ class RNNDecoder():
 class LatentToEmbedded():
     def __init__(self, d_model, latent_dim, stddev=1):
         self.expander_layer = Dense(d_model, input_shape=(1,))
-        self.stddev = 1 #stddev
+        self.layers = [Dense(d_model, input_shape=(d_model,), activation='relu') for _ in range(4)]
+        self.stddev = stddev
         self.latent_dim = latent_dim
-        # self.cheating = Dense(latent_dim)
 
         def sampling(args):
             z_mean_, z_logvar_ = args
@@ -525,8 +525,8 @@ class LatentToEmbedded():
         sampled_z = self.sampler([z_mean, z_logvar])
 
         expanded_z = self.expander_layer(Lambda(K.expand_dims)(sampled_z))
-
-
+        for layer in self.layers:
+            expanded_z = layer(expanded_z)
         return sampled_z, expanded_z  # self.expander_layer(sampled_z)
 
 
@@ -536,6 +536,7 @@ class DecoderFromLatent():
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
+
         def print_shape(arg):
             s = K.shape(arg)
             s = K.print_tensor(s, "SHAPE OF {}: ".format(arg.name))
@@ -552,8 +553,9 @@ class DecoderFromLatent():
         self_pad_mask = Lambda(lambda x: GetPadMask(x, x), name='DecoderPadMask')(tgt_seq)
         self_sub_mask = Lambda(GetSubMask, name='DecoderSubMask')(tgt_seq)
         self_mask = Lambda(lambda x: K.minimum(x[0], x[1]), name='DecoderSelfMask')([self_pad_mask, self_sub_mask])
-
-        enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]), name='DecoderEncMask')([tgt_seq, src_seq])
+        # Don't want encoder mask as there should be no padding for latent encoder
+        enc_mask = None
+        #Lambda(lambda x: GetPadMask(x[0], x[1]), name='DecoderEncMask')([tgt_seq, src_seq])
 
         pr = Lambda(lambda x: tf.Print(x, [x], "\nDECODER ENC_MASK: ", summarize=100))
         # enc_mask = pr(enc_mask)
