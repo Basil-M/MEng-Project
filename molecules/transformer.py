@@ -328,12 +328,17 @@ class RNNDecoder():
         self.conc_layer = Concatenate(axis=1, name='concat')
 
         # Sample from the means/variances decoded so far
-        def sampling(args):
-            z_mean_, z_logvar_ = args
-            batch_size = K.shape(z_mean_)[0]
-            k = K.shape(z_mean_)[1]
-            epsilon = K.random_normal(shape=(batch_size, k), mean=0., stddev=stddev)
-            return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [-1, k])
+        if stddev==0 or stddev is None:
+            def sampling(args):
+                z_mean_, z_logvar_ = args
+                return z_mean_
+        else:
+            def sampling(args):
+                z_mean_, z_logvar_ = args
+                batch_size = K.shape(z_mean_)[0]
+                k = K.shape(z_mean_)[1]
+                epsilon = K.random_normal(shape=(batch_size, k), mean=0., stddev=stddev)
+                return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [-1, k])
 
         def expand_dims(args):
             return K.expand_dims(args, axis=2)
@@ -503,7 +508,7 @@ class RNNDecoder():
 class LatentToEmbedded():
     def __init__(self, d_model, latent_dim, stddev=1):
         self.expander_layer = Dense(d_model, input_shape=(1,))
-        self.stddev = stddev
+        self.stddev = 1 #stddev
         self.latent_dim = latent_dim
         # self.cheating = Dense(latent_dim)
 
