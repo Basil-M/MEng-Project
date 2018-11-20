@@ -488,7 +488,7 @@ class RNNDecoder():
         # enc_mask = pr2(enc_mask)
 
         for dec_layer in self.layers:
-            z = pr2(z)
+            # z = pr2(z)
             z, _, _ = dec_layer(z, enc_output, self_mask, enc_mask)
 
 
@@ -496,12 +496,12 @@ class RNNDecoder():
         # where k is number of means/variances it's generated so far
         # predict the next means/variances based off the previous (width) means/variances
 
-        z = self.printer(z)
+        # z = self.printer(z)
         z = z[:, -self.decoder_width:, :]
 
         pr3 = Lambda(lambda x: tf.Print(x, [x], "\nCalculating next 2 means from: ", summarize=100))
-        z = pr3(z)
-        z = self.printer(z)
+        # z = pr3(z)
+        # z = self.printer(z)
         z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.decoder_width]))(z)
         z_logvar = z
         z_mean = z
@@ -513,7 +513,7 @@ class RNNDecoder():
 
         mean_k = self.squeeze(self.mean_layer(z_mean))
         logvar_k = self.squeeze(self.logvar_layer(z_logvar))
-        mean_k = pr(mean_k)
+        # mean_k = pr(mean_k)
         mean_so_far = self.conc_layer([mean_so_far, mean_k])
         logvar_so_far = self.conc_layer([logvar_so_far, logvar_k])
         # mean_so_far = self.pr(mean_so_far)
