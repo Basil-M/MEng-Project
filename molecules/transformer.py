@@ -315,16 +315,16 @@ class RNNDecoder():
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
 
         self.decoder_width = decoder_width
-        self.latent_embedder = Dense(d_model, activation='linear', name='latent_embedder')
+        self.latent_embedder = Dense(d_model, input_shape=(1,), activation='relu', name='latent_embedder')
         self.latent_dim = latent_dim
 
-        self.mean_layers = [Dense(d_model*latent_dim, input_shape=(d_model * latent_dim,), activation='relu') for _ in range(4)]
-        self.mean_layer = Dense(decoder_width, input_shape=(d_model * latent_dim,), name='mean_layer')
+        self.mean_layers = [Dense(d_model*decoder_width, input_shape=(d_model * decoder_width,), activation='relu') for _ in range(4)]
+        self.mean_layer = Dense(decoder_width, input_shape=(d_model * decoder_width,), name='mean_layer')
 
         self.first_sample = Dense(1, input_shape=(decoder_width,), name='first_iter')
 
-        self.logvar_layers = [Dense(d_model*latent_dim, input_shape=(d_model * latent_dim,), activation='relu') for _ in range(4)]
-        self.logvar_layer = Dense(decoder_width, input_shape=(d_model * latent_dim,), name='logvar_layer')
+        self.logvar_layers = [Dense(d_model*decoder_width, input_shape=(d_model * decoder_width,), activation='relu') for _ in range(4)]
+        self.logvar_layer = Dense(decoder_width, input_shape=(d_model * decoder_width,), name='logvar_layer')
         self.conc_layer = Concatenate(axis=1, name='concat')
 
         # Sample from the means/variances decoded so far
@@ -348,8 +348,8 @@ class RNNDecoder():
             # return K.squeeze(arg, axis=-1)
 
         def pad_with_zeros(arg):
-            paddings = [[0, 0], [0, K.constant(self.latent_dim, dtype='int32') - K.shape(arg)[1]]]
-            return tf.pad(arg, paddings, 'CONSTANT', constant_values=0.0)
+            #paddings = [[0, 0], [0, K.constant(self.latent_dim, dtype='int32') - K.shape(arg)[1]]]
+            return arg #tf.pad(arg, paddings, 'CONSTANT', constant_values=0.0)
             # return K.zeros(
             #     [K.shape(arg)[0], self.latent_dim - K.shape(arg)[1]],
             #     dtype="float")
@@ -364,7 +364,13 @@ class RNNDecoder():
         self.pad_zeros = Lambda(pad_with_zeros, name='ZerosForPadding')
         self.d_model = d_model
         self.resh = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))
-        self.ldim = K.constant(self.latent_dim, dtype='int32')
+        self.ldim = K.constant(latent_dim + decoder_width, dtype='int32')
+        self.printer = Lambda(self.print_shape)
+
+    def print_shape(self, arg):
+        s = K.shape(arg)
+        s = K.print_tensor(s, "SHAPE OF {}: ".format(arg.name))
+        return K.reshape(arg, s)
 
     def __call__(self, src_seq, enc_output):
         mean_init, var_init = self.first_iter(src_seq, enc_output)
@@ -382,9 +388,9 @@ class RNNDecoder():
 
 
             # will generate too many latent dimensions, so clip it
-            if (self.latent_dim - 1)%self.decoder_width != 0:
-                z_mean = z_mean[:, -self.latent_dim:]
-                z_logvar = z_logvar[:, -self.latent_dim:]
+            # if (self.latent_dim - 1)%self.decoder_width != 0:
+            z_mean = z_mean[:, -self.latent_dim:]
+            z_logvar = z_logvar[:, -self.latent_dim:]
 
             return [z_mean, z_logvar]
 
@@ -397,13 +403,12 @@ class RNNDecoder():
 
         def gen_zeros(sample_vec):
             batch_size = K.shape(sample_vec)[0]
-            return tf.keras.backend.zeros([batch_size, self.latent_dim], dtype='float', name='zeros')
+            return tf.keras.backend.zeros([batch_size, self.decoder_width], dtype='float', name='zeros')
 
         z_zero = Lambda(gen_zeros, name='z_zero')(enc_output)
-        decoder_input = self.latent_embedder(self.expand(z_zero))
 
-
-        z = decoder_input  # Add()([decoder_input, pos])
+        # expand so each sampled value is a vector of size d_model
+        z = self.latent_embedder(self.expand(z_zero))   #(batch_size, width, d_model)
 
         # Add positional encoding
         z_pos = Lambda(self.get_pos_seq)(z_zero)
@@ -431,9 +436,13 @@ class RNNDecoder():
                 self_atts.append(self_att)
                 enc_atts.append(enc_att)
 
-        z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))(z)
-        z_mean = z
+        #z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))(z)
+        # z should be [batch_size, width, d_model]
+        # where k is number of means/variances it's generated so far
+        # predict the next means/variances based off the previous (width) means/variances
+        z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.decoder_width]))(z)
         z_logvar = z
+        z_mean = z
         for layer in self.mean_layers:
             z_mean = layer(z_mean)
 
@@ -442,11 +451,9 @@ class RNNDecoder():
 
         output_mean = self.mean_layer(z_mean)
         output_mean = self.squeeze(output_mean)
-        output_mean = self.first_sample(output_mean)
 
         output_logvar = self.logvar_layer(z_logvar)
         output_logvar = self.squeeze(output_logvar)
-        output_logvar = self.first_sample(output_logvar)
 
         return (output_mean, output_logvar, self_atts, enc_atts) if return_att else (output_mean, output_logvar)
 
@@ -484,9 +491,20 @@ class RNNDecoder():
             z = pr2(z)
             z, _, _ = dec_layer(z, enc_output, self_mask, enc_mask)
 
-        z = self.resh(z)
-        z_mean = z
+
+        # z should be [batch_size, k, d_model]
+        # where k is number of means/variances it's generated so far
+        # predict the next means/variances based off the previous (width) means/variances
+
+        z = self.printer(z)
+        z = z[:, -self.decoder_width:, :]
+
+        pr3 = Lambda(lambda x: tf.Print(x, [x], "\nCalculating next 2 means from: ", summarize=100))
+        z = pr3(z)
+        z = self.printer(z)
+        z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.decoder_width]))(z)
         z_logvar = z
+        z_mean = z
         for layer in self.mean_layers:
             z_mean = layer(z_mean)
 
