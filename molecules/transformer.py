@@ -262,9 +262,9 @@ class Encoder():
         return (z_samp, kl_loss, z_mean, z_log_var, atts) if return_att else (z_samp, kl_loss, z_mean, z_log_var)
 
 
-class InterimEncoder():
+class VariationalEncoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
-                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=0.01):
+                 layers=6, dropout=0.1, word_emb=None, pos_emb=None):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
         self.layers = [EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
@@ -474,13 +474,14 @@ class RNNDecoder():
         self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
         enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([sampled_z, src_seq])
 
-        pr = Lambda(lambda x: tf.Print(x, [x], "\nID_SELF_MASK: ", summarize=100))
+        pr = Lambda(lambda x: tf.Print(x, [x], "\nGenerated next 2 means: ", summarize=100))
         # self_mask = pr(self_mask)
 
-        pr2 = Lambda(lambda x: tf.Print(x, [x], "\nID_ENC_MASK: ", summarize=100))
+        pr2 = Lambda(lambda x: tf.Print(x, [x], "\nZ: ", summarize=100))
         # enc_mask = pr2(enc_mask)
 
         for dec_layer in self.layers:
+            z = pr2(z)
             z, _, _ = dec_layer(z, enc_output, self_mask, enc_mask)
 
         z = self.resh(z)
@@ -494,6 +495,7 @@ class RNNDecoder():
 
         mean_k = self.squeeze(self.mean_layer(z_mean))
         logvar_k = self.squeeze(self.logvar_layer(z_logvar))
+        mean_k = pr(mean_k)
         mean_so_far = self.conc_layer([mean_so_far, mean_k])
         logvar_so_far = self.conc_layer([logvar_so_far, logvar_k])
         # mean_so_far = self.pr(mean_so_far)

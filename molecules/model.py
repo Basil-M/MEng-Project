@@ -365,10 +365,9 @@ class TriTransformer:
         i_word_emb = tr.Embedding(i_tokens.num(), d_emb)
         o_word_emb = i_word_emb
 
-        self.encoder = tr.InterimEncoder(self.d_model, p.get("d_inner_hid"), p.get("n_head"), p.get("d_k"),
+        self.encoder = tr.VariationalEncoder(self.d_model, p.get("d_inner_hid"), p.get("n_head"), p.get("d_k"),
                                          p.get("d_v"),
-                                         p.get("layers"), p.get("dropout"), stddev=p.get("epsilon"),
-                                         latent_dim=p.get("latent_dim"), word_emb=i_word_emb, pos_emb=pos_emb)
+                                         p.get("layers"), p.get("dropout"), word_emb=i_word_emb, pos_emb=pos_emb)
 
         if p.get("bottleneck") == "average":
             self.encoder_to_latent = tr.AvgLatent(p.get("d_model"), p.get("latent_dim"))
