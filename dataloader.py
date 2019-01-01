@@ -75,7 +75,7 @@ class AttnParams:
             "ID_d_v": 4,
             "ID_layers": 1,
             "ID_width": 2,
-            "epsilon": 1,
+            "epsilon": 0,
             "pp_epochs": 15,
             "pp_layers": 3,
             "model_arch": "TRANSFORMER",

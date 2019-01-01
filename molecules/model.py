@@ -439,12 +439,14 @@ class TriTransformer:
                                                          return_att=True)
         final_output = self.target_layer(dec_output)
 
+
         # Property prediction
-        encoded_input = Input(shape=[self.latent_dim], dtype='float', name='latent_rep')
-        h = Dense(self.latent_dim, activation='linear')(encoded_input)
-        for _ in range(self.pp_layers - 1):
-            h = Dense(self.latent_dim, activation='linear')(h)
-        prop_output = Dense(1, activation='linear')(h)
+        if not self.latent_dim is None:
+            encoded_input = Input(shape=[self.latent_dim], dtype='float', name='latent_rep')
+            h = Dense(self.latent_dim, activation='linear')(encoded_input)
+            for _ in range(self.pp_layers - 1):
+                h = Dense(self.latent_dim, activation='linear')(h)
+            prop_output = Dense(1, activation='linear')(h)
 
         def get_loss(args):
             y_pred, y_true, z_mean_, z_log_var_ = args
@@ -483,7 +485,8 @@ class TriTransformer:
         self.autoencoder.add_loss([loss])
 
         # For property prediction
-        self.property_predictor = Model(encoded_input, prop_output)
+        if not self.latent_dim is None:
+            self.property_predictor = Model(encoded_input, prop_output)
 
         # For outputting next symbol
         self.output_model = Model(src_seq_input, final_output)

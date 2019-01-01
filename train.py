@@ -25,7 +25,7 @@ RANDOM_SEED = 45
 DATA = 'data/zinc_100k.txt'
 MODEL_ARCH = 'TRANSFORMER'
 MODEL_NAME = 'attn'
-MODEL_NAME = 'LT1'
+MODEL_NAME = 'LT2'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -248,10 +248,7 @@ def main():
 
                 params = loaded_params
 
-        if params.get("model_arch") == "TRANSFORMER":
-            from molecules.model import Transformer as model_arch
-        else:
-            from molecules.model import TriTransformer as model_arch
+        from molecules.model import TriTransformer as model_arch
 
         # Set up model
         model = model_arch(tokens, params)

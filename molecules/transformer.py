@@ -315,7 +315,7 @@ class Vec2Variational():
         self.mean_layer = Dense(d_model, input_shape=(d_model,), activation='linear')
         self.logvar_layer = Dense(d_model, input_shape=(d_model,), activation='linear')
 
-    def __call__(self, src_seq, h):
+    def __call__(self, h):
         # src_seq not used; just included to match
         # calling structure of other decoders
         return self.mean_layer(h), self.logvar_layer(h)
@@ -548,7 +548,7 @@ class LatentToEmbedded():
                 z_mean_, z_logvar_ = args
                 batch_size = K.shape(z_mean_)[0]
                 len_limit = K.shape(z_mean_)[1]
-                epsilon = K.random_normal(shape=(batch_size, self.latent_dim), mean=0., stddev=self.stddev)
+                epsilon = K.random_normal(shape=(batch_size, len_limit, d_model), mean=0., stddev=self.stddev)
                 return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, len_limit, d_model])
 
             self.expander_layer = None
