@@ -352,11 +352,14 @@ class TriTransformer:
         self.decode_model = None
         self.bottleneck = p.get("bottleneck")
         self.stddev = p.get("epsilon")
-
-        if p.get("latent_dim") is None:
+        if self.bottleneck == "none":
+            p.set("latent_dim", None)
+            self.latent_dim = None
+        elif p.get("latent_dim") is None:
             self.latent_dim = p.get("d_model")
         else:
             self.latent_dim = p.get("latent_dim")
+
         self.pp_layers = p.get("pp_layers")
         d_emb = self.d_model
 
@@ -379,9 +382,11 @@ class TriTransformer:
                                                    stddev=p.get("epsilon"),
                                                    latent_dim=p.get("latent_dim"),
                                                    pos_emb=latent_pos_emb)
+        elif p.get("bottleneck") == "none":
+            self.encoder_to_latent = tr.Vec2Variational(p.get("d_model"),self.len_limit)
 
         self.latent_to_decoder = tr.LatentToEmbedded(self.d_model,
-                                                     latent_dim=p.get("latent_dim"),
+                                                     latent_dim=self.latent_dim,
                                                      stddev=p.get("epsilon"))
 
         self.decoder = tr.DecoderFromLatent(self.d_model, p.get("d_inner_hid"), p.get("n_head"), p.get("d_k"), p.get("d_v"),
@@ -418,10 +423,11 @@ class TriTransformer:
                                             return_att=True)
 
         # z_pos = Lambda(self.get_pos_seq)(src_seq)
-        if self.bottleneck == "average":
-            z_mean, z_logvar = self.encoder_to_latent(enc_output)
-        else:
+        if self.bottleneck == "interim_decoder":
             z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
+        else:
+            z_mean, z_logvar = self.encoder_to_latent(enc_output)
+
         print("Finished setting up decoder.")
 
         z_sampled, dec_input = self.latent_to_decoder(z_mean, z_logvar)
@@ -453,6 +459,7 @@ class TriTransformer:
 
             # If not variational, don't include KL loss
             if self.stddev == 0:
+                print("No VAE loss!")
                 return reconstruction_loss
             else:
                 kl_loss = - 0.5 * tf.reduce_sum(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_), name='KL_loss_sum')
@@ -470,7 +477,7 @@ class TriTransformer:
         self.accu = Lambda(get_accu)([final_output, tgt_true])
 
         # For encoding to z
-        self.output_latent = Model(src_seq_input, [z_mean, z_logvar])
+        self.output_latent = Model(src_seq_input, [z_sampled])
 
         self.autoencoder = Model(src_seq_input, loss)
         self.autoencoder.add_loss([loss])

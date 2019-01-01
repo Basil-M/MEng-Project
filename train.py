@@ -12,30 +12,32 @@ from os.path import exists
 from os import mkdir, remove
 import tensorflow as tf
 from keras import backend as k
+
 config = tf.ConfigProto()
-config.gpu_options.allow_growth=True
+config.gpu_options.allow_growth = True
 k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
 NUM_EPOCHS = 50
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 LATENT_DIM = 128
 RANDOM_SEED = 45
-DATA = 'data/zinc_1k.txt'
-MODEL_ARCH = 'ATTN_ID'
+DATA = 'data/zinc_100k.txt'
+MODEL_ARCH = 'TRANSFORMER'
 MODEL_NAME = 'attn'
-MODEL_NAME = 'LT4'
+MODEL_NAME = 'LT1'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
 from tensorflow import ConfigProto, Session
 from keras.backend.tensorflow_backend import set_session
 
-###################################z
+###################################
 # Prevent GPU pre-allocation
 config = ConfigProto()
 config.gpu_options.allow_growth = True
 set_session(Session(config=config))
+
 
 class epoch_track(Callback):
     def __init__(self, params, param_filename):
@@ -79,7 +81,7 @@ def get_arguments():
     parser.add_argument('--random_seed', type=int, metavar='N', default=RANDOM_SEED,
                         help='Seed to use to start randomizer for shuffling.')
     parser.add_argument('--model_arch', type=str, metavar='N', default=MODEL_ARCH,
-                        help='Model architecture to use - options are VAE, ATTN and ATTN_ID')
+                        help='Model architecture to use - options are VAE, TRANSFORMER')
 
     parser.add_argument('--gen', help='Whether to use generator for data', default=True)
 
@@ -117,7 +119,6 @@ def get_arguments():
     parser.add_argument('--layers', type=int, metavar='N', default=default.get("layers"),
                         help='Number of encoder/decoder layers')
 
-
     parser.add_argument('--dropout', type=float, metavar='0.1', default=default.get("dropout"),
                         help='Dropout to use in autoencoder')
     parser.add_argument('--epsilon', type=float, metavar='0.01', default=default.get("epsilon"),
@@ -137,18 +138,16 @@ def main():
     args = get_arguments()
     np.random.seed(args.random_seed)
 
-    if args.model_arch == 'VAE':
-        from molecules.model import MoleculeVAE as model_arch
-    else:
-        from molecules.model import TriTransformer as model_arch
-
-    from molecules.utils import one_hot_array, one_hot_index, from_one_hot_array, \
-        decode_smiles_from_indexes, load_dataset
-    from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, TensorBoard
-
     MODEL_DIR = args.models_dir + args.model + "/"
 
+    from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, TensorBoard
+    ## VARIATIONAL AUTOENCODER
     if args.model_arch == "VAE":
+
+        from molecules.utils import one_hot_array, one_hot_index, from_one_hot_array, \
+            decode_smiles_from_indexes, load_dataset
+
+        from molecules.model import MoleculeVAE as model_arch
         data_train, data_test, charset = load_dataset(args.data)
 
         model = model_arch()
@@ -178,21 +177,24 @@ def main():
     else:
         print("Making smiles dict")
 
+        # Get default attention parameters
         params = dd.AttnParams()
 
         # Process data
         params.set("d_file", args.data)
         d_file = args.data
         tokens = dd.MakeSmilesDict(d_file, dict_file=d_file.replace('.txt', '_dict.txt'))
+
+        # Get training and test data from data file
         if args.gen:
+            # Use a generator for data
             _, _, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
                                                               h5_file=d_file.replace('.txt', '_data.h5'))
             gen = dd.SMILESgen(d_file.replace('.txt', '_data.h5'), args.batch_size)
         else:
             data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
-                                                                               h5_file=d_file.replace('.txt', '_data.h5'))
-
-
+                                                                               h5_file=d_file.replace('.txt',
+                                                                                                      '_data.h5'))
 
         # Set up model
         for arg in vars(args):
@@ -207,6 +209,7 @@ def main():
         current_epoch = 1
         param_filename = MODEL_DIR + "params.pkl"
         loaded_params = dd.AttnParams()
+
         if not exists(param_filename):
             print("Starting new model {} with params:".format(args.model))
             params.dump()
@@ -245,7 +248,7 @@ def main():
 
                 params = loaded_params
 
-        if params.get("model_arch") == "ATTN":
+        if params.get("model_arch") == "TRANSFORMER":
             from molecules.model import Transformer as model_arch
         else:
             from molecules.model import TriTransformer as model_arch
@@ -272,13 +275,13 @@ def main():
                                  write_images=True,
                                  update_freq='batch')
 
-        # if args.bottleneck == "interim_decoder":
-        model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9))#, clipnorm=1.0, clipvalue=0.5))
-        # else:
-        #     model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9)) #, clipnorm=1.0, clipvalue=0.5))
-        # model.autoencoder.summary()
+        if args.bottleneck == "none":
+            model.compile_vae(Adam(0.001, 0.9, 0.98))
+        else:
+            model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
+
         try:
-                model.autoencoder.load_weights(MODEL_DIR + "model.h5")
+            model.autoencoder.load_weights(MODEL_DIR + "model.h5")
         except:
             print("New model.")
             params.save(param_filename)
@@ -298,7 +301,7 @@ def main():
                 if args.gen:
                     print("Using generator for data!")
                     model.autoencoder.fit_generator(gen.train_data, None,
-                                                    epochs=args.epochs, initial_epoch=current_epoch-1,
+                                                    epochs=args.epochs, initial_epoch=current_epoch - 1,
                                                     validation_data=gen.test_data,
                                                     callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback,
                                                                ep_track])
@@ -309,57 +312,59 @@ def main():
                                           validation_data=(data_test, None),
                                           callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback, ep_track])
 
-            print("Autoencoder training complete. Loading best model.")
-            model.autoencoder.load_weights(MODEL_DIR + "best_model.h5")
+            if params.get("bottleneck") != "none":
+                print("Autoencoder training complete. Loading best model.")
+                model.autoencoder.load_weights(MODEL_DIR + "best_model.h5")
 
-            # Try to load property training data
-            if not exists(MODEL_DIR + "latents.h5"):
-                print("Generating latent representations from auto-encoder for property predictor training.")
-                data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
-                                                                                   h5_file=d_file.replace('.txt',
-                                                                                                          '_data.h5'))
-                z_train = model.output_latent.predict([data_train], 64)
-                z_test = model.output_latent.predict([data_test], 64)
+                # Try to load property training data
+                if not exists(MODEL_DIR + "latents.h5"):
+                    print("Generating latent representations from auto-encoder for property predictor training.")
+                    data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
+                                                                                       h5_file=d_file.replace('.txt',
+                                                                                                              '_data.h5'))
+                    z_train = model.output_latent.predict([data_train], 64)
+                    z_test = model.output_latent.predict([data_test], 64)
 
-                with h5py.File(MODEL_DIR + "latents.h5", 'w') as dfile:
-                    dfile.create_dataset('z_test', data=z_test)
-                    dfile.create_dataset('z_train', data=z_train)
+                    with h5py.File(MODEL_DIR + "latents.h5", 'w') as dfile:
+                        dfile.create_dataset('z_test', data=z_test)
+                        dfile.create_dataset('z_train', data=z_train)
 
+                else:
+                    print("Loading previously generated latent representations for property predictor training.")
+                    with h5py.File(MODEL_DIR + "latents.h5") as dfile:
+                        z_test, z_train = dfile['z_test'][:], dfile['z_train'][:]
+
+                # Strange hack for dimensionality
+                props_test = np.expand_dims(props_test, 3)
+                props_train = np.expand_dims(props_train, 3)
+                model.property_predictor.compile(optimizer='adam',
+                                                 loss='mean_squared_error')
+                # Model saver
+                model_saver = ModelCheckpoint(MODEL_DIR + "pp_model.h5", save_best_only=False,
+                                              save_weights_only=True)
+
+                best_model_saver = ModelCheckpoint(MODEL_DIR + "best_pp_model.h5", save_best_only=True,
+                                                   save_weights_only=True)
+
+                # Load in property predictor weights
+                try:
+                    model.property_predictor.load_weights(MODEL_DIR + "pp_model.h5", by_name=True)
+                except:
+                    pass
+
+                print("Training property predictor")
+                model.property_predictor.fit(z_train, np.expand_dims(props_train, 3),
+                                             batch_size=params.get("batch_size"), epochs=params.get("pp_epochs"),
+                                             initial_epoch=params.get("current_epoch") - 1,
+                                             validation_data=(z_test, np.expand_dims(props_test, 3)),
+                                             callbacks=[model_saver, best_model_saver, tbCallback, ep_track])
+
+                try:
+                    model.property_predictor.load_weights(MODEL_DIR + "best_pp_model.h5", by_name=True)
+                except:
+                    pass
             else:
-                print("Loading previously generated latent representations for property predictor training.")
-                with h5py.File(MODEL_DIR + "latents.h5") as dfile:
-                    z_test, z_train = dfile['z_test'][:], dfile['z_train'][:]
-
-            # Strange hack for dimensionality
-            props_test = np.expand_dims(props_test, 3)
-            props_train = np.expand_dims(props_train, 3)
-            model.property_predictor.compile(optimizer='adam',
-                                             loss='mean_squared_error')
-            # Model saver
-            model_saver = ModelCheckpoint(MODEL_DIR + "pp_model.h5", save_best_only=False,
-                                          save_weights_only=True)
-
-            best_model_saver = ModelCheckpoint(MODEL_DIR + "best_pp_model.h5", save_best_only=True,
-                                               save_weights_only=True)
-
-            # Load in property predictor weights
-            try:
-                model.property_predictor.load_weights(MODEL_DIR + "pp_model.h5", by_name=True)
-            except:
-                pass
-
-            print("Training property predictor")
-            model.property_predictor.fit(z_train, np.expand_dims(props_train, 3),
-                                         batch_size=params.get("batch_size"), epochs=params.get("pp_epochs"),
-                                         initial_epoch=params.get("current_epoch") - 1,
-                                         validation_data=(z_test, np.expand_dims(props_test, 3)),
-                                         callbacks=[model_saver, best_model_saver, tbCallback, ep_track])
-
-            try:
-                model.property_predictor.load_weights(MODEL_DIR + "best_pp_model.h5", by_name=True)
-            except:
-                pass
-
+                print("No bottleneck, so cannot train property prediction model")
         except KeyboardInterrupt:
             print("Interrupted on epoch {}".format(ep_track.epoch()))
 

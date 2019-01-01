@@ -307,6 +307,20 @@ class AvgLatent():
         h = self.after_avg(h)
         return self.mean_layer(h), self.logvar_layer(h)
 
+class Vec2Variational():
+    '''
+    Simply yields a mean and variance using a linear transformation
+    '''
+    def __init__(self, d_model, max_len):
+        self.mean_layer = Dense(d_model, input_shape=(d_model,), activation='linear')
+        self.logvar_layer = Dense(d_model, input_shape=(d_model,), activation='linear')
+
+    def __call__(self, src_seq, h):
+        # src_seq not used; just included to match
+        # calling structure of other decoders
+        return self.mean_layer(h), self.logvar_layer(h)
+
+
 class RNNDecoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
                  layers=6, decoder_width=1, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=1):
@@ -525,17 +539,30 @@ class RNNDecoder():
 
 
 class LatentToEmbedded():
-    def __init__(self, d_model, latent_dim, stddev=1):
-        self.expander_layer = Dense(d_model, input_shape=(1,))
-        self.layers = [Dense(d_model, input_shape=(d_model,), activation='relu') for _ in range(4)]
+    def __init__(self, d_model, latent_dim=None, stddev=1):
+        if latent_dim is None:
+            # if there is no latent dim we are not using a bottleneck
+            # so the data is simply a matrix of size [batch_size, len_limit, d_model]
+
+            def sampling(args):
+                z_mean_, z_logvar_ = args
+                batch_size = K.shape(z_mean_)[0]
+                len_limit = K.shape(z_mean_)[1]
+                epsilon = K.random_normal(shape=(batch_size, self.latent_dim), mean=0., stddev=self.stddev)
+                return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, len_limit, d_model])
+
+            self.expander_layer = None
+        else:
+            self.expander_layer = Dense(d_model, input_shape=(1,))
+            self.layers = [Dense(d_model, input_shape=(d_model,), activation='relu') for _ in range(4)]
+
+            def sampling(args):
+                z_mean_, z_logvar_ = args
+                batch_size = K.shape(z_mean_)[0]
+                epsilon = K.random_normal(shape=(batch_size, self.latent_dim), mean=0., stddev=self.stddev)
+                return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, self.latent_dim])
         self.stddev = stddev
         self.latent_dim = latent_dim
-
-        def sampling(args):
-            z_mean_, z_logvar_ = args
-            batch_size = K.shape(z_mean_)[0]
-            epsilon = K.random_normal(shape=(batch_size, self.latent_dim), mean=0., stddev=self.stddev)
-            return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, self.latent_dim])
 
         self.sampler = Lambda(sampling, name='LatentToEmbeddingSampler')
 
@@ -544,11 +571,15 @@ class LatentToEmbedded():
         # Gives vector of size (batch_size, latent_dim)
         sampled_z = self.sampler([z_mean, z_logvar])
 
-        # Expand to model dimension
+        # If there is a bottleneck, we need to expand back to model dimension
         # Now size (batch_size, latent_dim, d_model)
-        expanded_z = self.expander_layer(Lambda(K.expand_dims)(sampled_z))
-        for layer in self.layers:
-            expanded_z = layer(expanded_z)
+        if self.expander_layer is None:
+            expanded_z = sampled_z
+        else:
+            expanded_z = self.expander_layer(Lambda(K.expand_dims)(sampled_z))
+
+            for layer in self.layers:
+                expanded_z = layer(expanded_z)
         return sampled_z, expanded_z  # self.expander_layer(sampled_z)
 
 
