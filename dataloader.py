@@ -60,14 +60,14 @@ class AttnParams:
             "ae_trained": False,
             "batch_size": 64,
             "len_limit": 120,
-            "d_model": 196,
-            "d_inner_hid": 512,
-            "n_head": 8,
-            "d_k": 8,
-            "d_v": 8,
+            "d_model": 24,
+            "d_inner_hid": 128,
+            "n_head": 4,
+            "d_k": 6,
+            "d_v": 6,
             "layers": 1,
             "dropout": 0.1,
-            "latent_dim": 196,  # 64
+            "latent_dim": 32,  # 64
             "ID_d_model": 16,
             "ID_d_inner_hid": 32,
             "ID_n_head": 8,
@@ -75,11 +75,11 @@ class AttnParams:
             "ID_d_v": 4,
             "ID_layers": 1,
             "ID_width": 2,
-            "epsilon": 0,
+            "epsilon": 0.01,
             "pp_epochs": 15,
             "pp_layers": 3,
             "model_arch": "TRANSFORMER",
-            "bottleneck": "none"
+            "bottleneck": "interim_decoder"
         }
 
     def get(self, param):

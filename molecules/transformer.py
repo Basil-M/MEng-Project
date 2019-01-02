@@ -336,23 +336,23 @@ class RNNDecoder():
         self.mean_layer = TimeDistributed(Dense(1, input_shape=(decoder_width, d_model), name='mean_layer'))
 
         self.first_sample = Dense(1, input_shape=(decoder_width,), name='first_iter')
-
-        self.logvar_layers = [TimeDistributed(Dense(d_model, input_shape=(decoder_width, d_model), activation='relu')) for _ in range(4)]
-        self.logvar_layer = TimeDistributed(Dense(1, input_shape=(decoder_width, d_model), name='mean_layer'))
         self.conc_layer = Concatenate(axis=1, name='concat')
 
         # Sample from the means/variances decoded so far
-        if stddev==0 or stddev is None:
-            def sampling(args):
-                z_mean_, z_logvar_ = args
-                return z_mean_
-        else:
-            def sampling(args):
-                z_mean_, z_logvar_ = args
-                batch_size = K.shape(z_mean_)[0]
-                k = K.shape(z_mean_)[1]
-                epsilon = K.random_normal(shape=(batch_size, k), mean=0., stddev=stddev)
-                return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [-1, k])
+        # if stddev==0 or stddev is None:
+        #     def sampling(args):
+        #         z_mean_, z_logvar_ = args
+        #         return z_mean_
+        #     self.logvar_layer = None
+        # else:
+        self.logvar_layers = [TimeDistributed(Dense(d_model, input_shape=(decoder_width, d_model), activation='relu')) for _ in range(4)]
+        self.logvar_layer = TimeDistributed(Dense(1, input_shape=(decoder_width, d_model), name='mean_layer'))
+        def sampling(args):
+            z_mean_, z_logvar_ = args
+            batch_size = K.shape(z_mean_)[0]
+            k = K.shape(z_mean_)[1]
+            epsilon = K.random_normal(shape=(batch_size, k), mean=0., stddev=stddev)
+            return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [-1, k])
 
         def expand_dims(args):
             return K.expand_dims(args, axis=2)
@@ -521,11 +521,16 @@ class RNNDecoder():
         for layer in self.mean_layers:
             z_mean = layer(z_mean)
 
+        # if not self.logvar_layer is None:
         for layer in self.logvar_layers:
             z_logvar = layer(z_logvar)
 
-        mean_k = self.squeeze(self.mean_layer(z_mean))
         logvar_k = self.squeeze(self.logvar_layer(z_logvar))
+        # else:
+        #     z_logvar = None
+        #     logvar_so_far = None
+        mean_k = self.squeeze(self.mean_layer(z_mean))
+
         # mean_k = pr(mean_k)
         mean_so_far = self.conc_layer([mean_so_far, mean_k])
         logvar_so_far = self.conc_layer([logvar_so_far, logvar_k])

@@ -175,7 +175,7 @@ class Transformer:
         prop_output = Dense(1, activation='linear')(h)
 
         def get_loss(args):
-            y_pred, y_true = args
+            y_pred, y_true, kl_loss = args
             y_true = tf.cast(y_true, 'int32')
             loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true, logits=y_pred)
             mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
@@ -383,7 +383,7 @@ class TriTransformer:
                                                    latent_dim=p.get("latent_dim"),
                                                    pos_emb=latent_pos_emb)
         elif p.get("bottleneck") == "none":
-            self.encoder_to_latent = tr.Vec2Variational(p.get("d_model"),self.len_limit)
+            self.encoder_to_latent = tr.Vec2Variational(p.get("d_model"), self.len_limit)
 
         self.latent_to_decoder = tr.LatentToEmbedded(self.d_model,
                                                      latent_dim=self.latent_dim,
@@ -441,12 +441,17 @@ class TriTransformer:
 
 
         # Property prediction
-        if not self.latent_dim is None:
-            encoded_input = Input(shape=[self.latent_dim], dtype='float', name='latent_rep')
-            h = Dense(self.latent_dim, activation='linear')(encoded_input)
-            for _ in range(self.pp_layers - 1):
-                h = Dense(self.latent_dim, activation='linear')(h)
-            prop_output = Dense(1, activation='linear')(h)
+        if self.latent_dim is None:
+            latent_dim = self.d_model*self.len_limit
+            encoded_input = Input(shape=[self.d_model, self.len_limit], dtype='float', name='latent_rep')
+        else:
+            latent_dim = self.latent_dim
+            encoded_input = Input(shape=[latent_dim], dtype='float', name='latent_rep')
+
+        h = Dense(latent_dim, activation='linear')(encoded_input)
+        for _ in range(self.pp_layers - 1):
+            h = Dense(latent_dim, activation='linear')(h)
+        prop_output = Dense(1, activation='linear')(h)
 
         def get_loss(args):
             y_pred, y_true, z_mean_, z_log_var_ = args
@@ -464,7 +469,7 @@ class TriTransformer:
                 print("No VAE loss!")
                 return reconstruction_loss
             else:
-                kl_loss = - 0.5 * tf.reduce_sum(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_), name='KL_loss_sum')
+                kl_loss = - 0.5 * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_), name='KL_loss_sum')
                 return reconstruction_loss + kl_loss
 
         def get_accu(args):
@@ -485,8 +490,8 @@ class TriTransformer:
         self.autoencoder.add_loss([loss])
 
         # For property prediction
-        if not self.latent_dim is None:
-            self.property_predictor = Model(encoded_input, prop_output)
+        # if not self.latent_dim is None:
+        self.property_predictor = Model(encoded_input, prop_output)
 
         # For outputting next symbol
         self.output_model = Model(src_seq_input, final_output)

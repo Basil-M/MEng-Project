@@ -18,14 +18,14 @@ config.gpu_options.allow_growth = True
 k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
-NUM_EPOCHS = 50
-BATCH_SIZE = 64
+NUM_EPOCHS = 5
+BATCH_SIZE = 20
 LATENT_DIM = 128
-RANDOM_SEED = 45
+RANDOM_SEED = 1103
 DATA = 'data/zinc_100k.txt'
 MODEL_ARCH = 'TRANSFORMER'
 MODEL_NAME = 'attn'
-MODEL_NAME = 'LT2'
+MODEL_NAME = 'LT14'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -183,7 +183,8 @@ def main():
         # Process data
         params.set("d_file", args.data)
         d_file = args.data
-        tokens = dd.MakeSmilesDict(d_file, dict_file=d_file.replace('.txt', '_dict.txt'))
+        # tokens = dd.MakeSmilesDict(d_file, dict_file=d_file.replace('.txt', '_dict.txt'))
+        tokens = dd.MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
 
         # Get training and test data from data file
         if args.gen:
@@ -309,7 +310,7 @@ def main():
                                           validation_data=(data_test, None),
                                           callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback, ep_track])
 
-            if params.get("bottleneck") != "none":
+            if params.get("bottleneck") != "nppe":
                 print("Autoencoder training complete. Loading best model.")
                 model.autoencoder.load_weights(MODEL_DIR + "best_model.h5")
 
