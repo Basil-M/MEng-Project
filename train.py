@@ -25,7 +25,7 @@ RANDOM_SEED = 1103
 DATA = 'data/zinc_100k.txt'
 MODEL_ARCH = 'TRANSFORMER'
 MODEL_NAME = 'attn'
-MODEL_NAME = 'LT14'
+MODEL_NAME = 'LT15'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options

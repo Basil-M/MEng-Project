@@ -63,8 +63,8 @@ class AttnParams:
             "d_model": 24,
             "d_inner_hid": 128,
             "n_head": 4,
-            "d_k": 6,
-            "d_v": 6,
+            "d_k": 4,
+            "d_v": 4,
             "layers": 1,
             "dropout": 0.1,
             "latent_dim": 32,  # 64

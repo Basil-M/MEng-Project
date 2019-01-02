@@ -290,7 +290,7 @@ class VariationalEncoder():
 class AvgLatent():
     def __init__(self, d_model, latent_dim):
         n_layers = 2
-        self.layers = [Dense(d_model, input_shape=(d_model,), activation='relu') for _ in range(n_layers)]
+        self.layers = [Dense(d_model, input_shape=(d_model,), activation='linear') for _ in range(n_layers)]
 
         # self.trans = Dense(d_model, input_shape=(d_model,))
 
@@ -329,10 +329,10 @@ class RNNDecoder():
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
 
         self.decoder_width = decoder_width
-        self.latent_embedder = Dense(d_model, input_shape=(1,), activation='relu', name='latent_embedder')
+        self.latent_embedder = Dense(d_model, input_shape=(1,), activation='linear', name='latent_embedder')
         self.latent_dim = latent_dim
 
-        self.mean_layers = [TimeDistributed(Dense(d_model, input_shape=(decoder_width, d_model), activation='relu')) for _ in range(4)]
+        self.mean_layers = [TimeDistributed(Dense(d_model, input_shape=(decoder_width, d_model), activation='linear')) for _ in range(4)]
         self.mean_layer = TimeDistributed(Dense(1, input_shape=(decoder_width, d_model), name='mean_layer'))
 
         self.first_sample = Dense(1, input_shape=(decoder_width,), name='first_iter')
@@ -345,7 +345,7 @@ class RNNDecoder():
         #         return z_mean_
         #     self.logvar_layer = None
         # else:
-        self.logvar_layers = [TimeDistributed(Dense(d_model, input_shape=(decoder_width, d_model), activation='relu')) for _ in range(4)]
+        self.logvar_layers = [TimeDistributed(Dense(d_model, input_shape=(decoder_width, d_model), activation='linear')) for _ in range(4)]
         self.logvar_layer = TimeDistributed(Dense(1, input_shape=(decoder_width, d_model), name='mean_layer'))
         def sampling(args):
             z_mean_, z_logvar_ = args
@@ -559,7 +559,7 @@ class LatentToEmbedded():
             self.expander_layer = None
         else:
             self.expander_layer = Dense(d_model, input_shape=(1,))
-            self.layers = [Dense(d_model, input_shape=(d_model,), activation='relu') for _ in range(4)]
+            self.layers = [Dense(d_model, input_shape=(d_model,), activation='linear') for _ in range(4)]
 
             def sampling(args):
                 z_mean_, z_logvar_ = args
