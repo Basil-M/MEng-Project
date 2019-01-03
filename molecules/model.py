@@ -410,10 +410,18 @@ class TriTransformer:
         tgt_seq_input = src_seq_input  # Input(shape=(None,), dtype='int32', name='tgt_seq_input')
 
         src_seq = src_seq_input
+
+        pr = Lambda(lambda x: tf.Print(x, [x], "\nSRC_SEQ: ", summarize=1000))
+        # src_seq = pr(src_seq)
+        pr = Lambda(lambda x: tf.Print(x, [x], "\nTGT_SEQ: ", summarize=1000))
         tgt_seq = Lambda(lambda x: x[:, :-1])(tgt_seq_input)
+        # tgt_seq = pr(tgt_seq)
         tgt_true = Lambda(lambda x: x[:, 1:])(tgt_seq_input)
 
         src_pos = Lambda(self.get_pos_seq)(src_seq)
+
+        pr = Lambda(lambda x: tf.Print(x, [x], "\nSRC_POS: ", summarize=1000))
+        # src_pos = pr(src_pos)
         tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
         if not self.src_loc_info: src_pos = None
 
@@ -422,12 +430,18 @@ class TriTransformer:
                                             active_layers=active_layers,
                                             return_att=True)
 
+        pr = Lambda(lambda x: tf.Print(x, [x], "\nENC_OUTPUT: ", summarize=1000))
+        # enc_output = pr(enc_output)
         # z_pos = Lambda(self.get_pos_seq)(src_seq)
         if self.bottleneck == "interim_decoder":
             z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
         else:
             z_mean, z_logvar = self.encoder_to_latent(enc_output)
 
+        pr = Lambda(lambda x: tf.Print(x, [x], "\nZ_MEAN: ", summarize=1000))
+        # z_mean = pr(z_mean)
+        pr = Lambda(lambda x: tf.Print(x, [x], "\nZ_LOGVAR: ", summarize=1000))
+        # z_logvar = pr(z_logvar)
         print("Finished setting up decoder.")
 
         z_sampled, dec_input = self.latent_to_decoder(z_mean, z_logvar)
@@ -455,14 +469,20 @@ class TriTransformer:
 
         def get_loss(args):
             y_pred, y_true, z_mean_, z_log_var_ = args
+
+            pr = Lambda(lambda x: tf.Print(x, [x], "\nY_PRED: ", summarize=1000))
+            pr2 = Lambda(lambda x: tf.Print(x, [x], "\nY_TRUE: ", summarize=1000))
+            # y_pred = pr(y_pred)
+            # y_true = pr2(y_true)
+
             y_true = tf.cast(y_true, 'int32')
             loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true, logits=y_pred)
             mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
             loss = tf.reduce_sum(loss * mask, -1) / tf.reduce_sum(mask, -1)
             reconstruction_loss = K.mean(loss)
 
-            # z_mean_ = tf.Print(z_mean_, [z_mean_], "\nz_mean_: ", summarize=1000)
-            # z_log_var_ = tf.Print(z_log_var_, [z_log_var_], "\nz_log_var_: ", summarize=1000)
+            # z_mean_ = tf.Print(z_mean_, [z_mean_], "\nLOSS CALCS: z_mean_: ", summarize=1000)
+            # z_log_var_ = tf.Print(z_log_var_, [z_log_var_], "\nLOSS CALCS: z_log_var_: ", summarize=1000)
 
             # If not variational, don't include KL loss
             if self.stddev == 0:
@@ -482,7 +502,8 @@ class TriTransformer:
         loss = Lambda(get_loss, name='LossFn')([final_output, tgt_true, z_mean, z_logvar])
         self.ppl = Lambda(K.exp)(loss)
         self.accu = Lambda(get_accu)([final_output, tgt_true])
-
+        self.meanz = Lambda(tf.reduce_mean)(z_mean)
+        self.meanzvar = Lambda(tf.reduce_mean)(z_logvar)
         # For encoding to z
         self.output_latent = Model(src_seq_input, [z_sampled])
 
@@ -504,6 +525,11 @@ class TriTransformer:
         self.autoencoder.metrics_tensors.append(self.ppl)
         self.autoencoder.metrics_names.append('accu')
         self.autoencoder.metrics_tensors.append(self.accu)
+        self.autoencoder.metrics_names.append('meanmean')
+        self.autoencoder.metrics_tensors.append(self.meanz)
+        self.autoencoder.metrics_names.append('meanlogvar')
+        self.autoencoder.metrics_tensors.append(self.meanzvar)
+
         # self.autoencoder.summary()
         # self.make_fast_decode_model()
 

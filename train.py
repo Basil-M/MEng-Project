@@ -19,13 +19,13 @@ k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
 NUM_EPOCHS = 5
-BATCH_SIZE = 20
+BATCH_SIZE = 30
 LATENT_DIM = 128
 RANDOM_SEED = 1103
 DATA = 'data/zinc_100k.txt'
 MODEL_ARCH = 'TRANSFORMER'
 MODEL_NAME = 'attn'
-MODEL_NAME = 'LT15'
+MODEL_NAME = 'LT9'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -82,8 +82,9 @@ def get_arguments():
                         help='Seed to use to start randomizer for shuffling.')
     parser.add_argument('--model_arch', type=str, metavar='N', default=MODEL_ARCH,
                         help='Model architecture to use - options are VAE, TRANSFORMER')
-
-    parser.add_argument('--gen', help='Whether to use generator for data', default=True)
+    parser.add_argument('--base_lr', type=float, metavar='0.001', default=0.001,
+                        help='Base training rate for ADAM optimizer')
+    parser.add_argument('--gen', help='Whether to use generator for data', default=False)
 
     ### BOTTLENECK PARAMETERS
     parser.add_argument('--latent_dim', type=int, metavar='N', default=default.get("latent_dim"),
@@ -143,7 +144,6 @@ def main():
     from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, TensorBoard
     ## VARIATIONAL AUTOENCODER
     if args.model_arch == "VAE":
-
         from molecules.utils import one_hot_array, one_hot_index, from_one_hot_array, \
             decode_smiles_from_indexes, load_dataset
 
@@ -163,7 +163,7 @@ def main():
         reduce_lr = ReduceLROnPlateau(monitor='val_loss',
                                       factor=0.2,
                                       patience=3,
-                                      min_lr=0.0001)
+                                      min_lr=args.base_lr/10)
 
         model.autoencoder.fit(
             data_train,
@@ -196,7 +196,8 @@ def main():
             data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
                                                                                h5_file=d_file.replace('.txt',
                                                                                                       '_data.h5'))
-
+        print("TRAIN NANS: {}".format(np.sum(np.isnan(data_train))))
+        print("TEST NANS: {}".format(np.sum(np.isnan(data_test))))
         # Set up model
         for arg in vars(args):
             if arg in params.params:
@@ -256,7 +257,7 @@ def main():
 
         # Learning rate scheduler
         lr_scheduler = LRSchedulerPerStep(params.get("d_model"),
-                                          4000)  # there is a warning that it is slow, however, it's ok.
+                                          int(4/args.base_lr))  # there is a warning that it is slow, however, it's ok.
 
         # Model saver
         model_saver = ModelCheckpoint(MODEL_DIR + "model.h5", save_best_only=False,
@@ -274,9 +275,10 @@ def main():
                                  update_freq='batch')
 
         if args.bottleneck == "none":
-            model.compile_vae(Adam(0.001, 0.9, 0.98))
+            model.compile_vae(Adam(args.base_lr, 0.9, 0.98))
         else:
-            model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
+            # avoid exploding gradients
+            model.compile_vae(Adam(args.base_lr, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
 
         try:
             model.autoencoder.load_weights(MODEL_DIR + "model.h5")

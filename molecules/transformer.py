@@ -287,10 +287,13 @@ class VariationalEncoder():
 
         return (h, atts) if return_att else h
 
+
+NUM_LAYERS = 5
+ACT = 'relu'
+
 class AvgLatent():
     def __init__(self, d_model, latent_dim):
-        n_layers = 2
-        self.layers = [Dense(d_model, input_shape=(d_model,), activation='linear') for _ in range(n_layers)]
+        self.layers = [Dense(d_model, input_shape=(d_model,), activation='relu') for _ in range(NUM_LAYERS)]
 
         # self.trans = Dense(d_model, input_shape=(d_model,))
 
@@ -307,18 +310,22 @@ class AvgLatent():
         h = self.after_avg(h)
         return self.mean_layer(h), self.logvar_layer(h)
 
+
+
 class Vec2Variational():
     '''
     Simply yields a mean and variance using a linear transformation
     '''
+
     def __init__(self, d_model, max_len):
-        self.mean_layer = Dense(d_model, input_shape=(d_model,), activation='linear')
-        self.logvar_layer = Dense(d_model, input_shape=(d_model,), activation='linear')
+        self.mean_layer = Dense(d_model, input_shape=(d_model,), activation=ACT)
+        self.logvar_layer = Dense(d_model, input_shape=(d_model,), activation=ACT)
 
     def __call__(self, h):
         # src_seq not used; just included to match
         # calling structure of other decoders
         return self.mean_layer(h), self.logvar_layer(h)
+
 
 
 class RNNDecoder():
@@ -329,24 +336,21 @@ class RNNDecoder():
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
 
         self.decoder_width = decoder_width
-        self.latent_embedder = Dense(d_model, input_shape=(1,), activation='linear', name='latent_embedder')
+        self.latent_embedder = Dense(d_model, input_shape=(1,), activation=ACT, name='latent_embedder')
         self.latent_dim = latent_dim
 
-        self.mean_layers = [TimeDistributed(Dense(d_model, input_shape=(decoder_width, d_model), activation='linear')) for _ in range(4)]
-        self.mean_layer = TimeDistributed(Dense(1, input_shape=(decoder_width, d_model), name='mean_layer'))
+        self.mean_layers = [TimeDistributed(Dense(d_model, input_shape=(decoder_width, d_model), activation=ACT)) for
+                            _ in range(NUM_LAYERS - 1)]
+        self.mean_layer = TimeDistributed(
+            Dense(1, input_shape=(decoder_width, d_model), activation=ACT, name='mean_layer'))
 
-        self.first_sample = Dense(1, input_shape=(decoder_width,), name='first_iter')
+        self.logvar_layers = [TimeDistributed(Dense(d_model, input_shape=(decoder_width, d_model), activation=ACT))
+                              for _ in range(NUM_LAYERS - 1)]
+        self.logvar_layer = TimeDistributed(
+            Dense(1, input_shape=(decoder_width, d_model), activation=ACT, name='logvar_layer'))
+
         self.conc_layer = Concatenate(axis=1, name='concat')
 
-        # Sample from the means/variances decoded so far
-        # if stddev==0 or stddev is None:
-        #     def sampling(args):
-        #         z_mean_, z_logvar_ = args
-        #         return z_mean_
-        #     self.logvar_layer = None
-        # else:
-        self.logvar_layers = [TimeDistributed(Dense(d_model, input_shape=(decoder_width, d_model), activation='linear')) for _ in range(4)]
-        self.logvar_layer = TimeDistributed(Dense(1, input_shape=(decoder_width, d_model), name='mean_layer'))
         def sampling(args):
             z_mean_, z_logvar_ = args
             batch_size = K.shape(z_mean_)[0]
@@ -361,23 +365,12 @@ class RNNDecoder():
             return K.reshape(arg, [K.shape(arg)[0], decoder_width])
             # return K.squeeze(arg, axis=-1)
 
-        def pad_with_zeros(arg):
-            #paddings = [[0, 0], [0, K.constant(self.latent_dim, dtype='int32') - K.shape(arg)[1]]]
-            return arg #tf.pad(arg, paddings, 'CONSTANT', constant_values=0.0)
-            # return K.zeros(
-            #     [K.shape(arg)[0], self.latent_dim - K.shape(arg)[1]],
-            #     dtype="float")
-
-        def init_zeros(arg):
-            return K.zeros([K.shape(arg)[0], K.constant(self.latent_dim, dtype='int32')], dtype='float32')
-
-        self.init = Lambda(init_zeros)
+        # self.init = Lambda(init_zeros)
         self.sampler = Lambda(sampling, name='InterimDecoderSampler')
         self.expand = Lambda(expand_dims, name='DimExpander')
         self.squeeze = Lambda(collapse_dims, name='DimCollapser')
-        self.pad_zeros = Lambda(pad_with_zeros, name='ZerosForPadding')
-        self.d_model = d_model
-        self.resh = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))
+        # self.pad_zeros = Lambda(pad_with_zeros, name='ZerosForPadding')
+        # self.d_model = d_model
         self.ldim = K.constant(latent_dim + decoder_width, dtype='int32')
         self.printer = Lambda(self.print_shape)
 
@@ -400,17 +393,13 @@ class RNNDecoder():
                                                                      enc_output.get_shape()],
                                                    parallel_iterations=32)
 
-
             # will generate too many latent dimensions, so clip it
-            # if (self.latent_dim - 1)%self.decoder_width != 0:
             z_mean = z_mean[:, -self.latent_dim:]
             z_logvar = z_logvar[:, -self.latent_dim:]
 
             return [z_mean, z_logvar]
 
         return Lambda(the_loop)([mean_init, var_init])
-
-
 
     def first_iter(self, src_seq, enc_output, return_att=False, active_layers=999):
         print("Setting up first decoder iteration")
@@ -421,8 +410,8 @@ class RNNDecoder():
 
         z_zero = Lambda(gen_zeros, name='z_zero')(enc_output)
 
-        # expand so each sampled value is a vector of size d_model
-        z = self.latent_embedder(self.expand(z_zero))   #(batch_size, width, d_model)
+        # expand so each value is a vector of size d_model
+        z = self.latent_embedder(self.expand(z_zero))  # (batch_size, width, d_model)
 
         # Add positional encoding
         z_pos = Lambda(self.get_pos_seq)(z_zero)
@@ -450,7 +439,7 @@ class RNNDecoder():
                 self_atts.append(self_att)
                 enc_atts.append(enc_att)
 
-        #z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))(z)
+        # z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))(z)
         # z should be [batch_size, width, d_model]
         # where k is number of means/variances it's generated so far
         # predict the next means/variances based off the previous (width) means/variances
@@ -478,7 +467,7 @@ class RNNDecoder():
         sampled_z = self.sampler([mean_so_far, logvar_so_far])
 
         # Should be vector of size [batch_size, latent_dim]
-        sampled_z = self.pad_zeros(sampled_z)
+        # sampled_z = self.pad_zeros(sampled_z)
 
         # Expand to matrix of size [batch_size, latent_dim, model_dim]
         z = self.latent_embedder(self.expand(sampled_z))
@@ -503,7 +492,6 @@ class RNNDecoder():
         for dec_layer in self.layers:
             # z = pr2(z)
             z, _, _ = dec_layer(z, enc_output, self_mask, enc_mask)
-
 
         # z should be [batch_size, k, d_model]
         # where k is number of means/variances it's generated so far
@@ -559,7 +547,7 @@ class LatentToEmbedded():
             self.expander_layer = None
         else:
             self.expander_layer = Dense(d_model, input_shape=(1,))
-            self.layers = [Dense(d_model, input_shape=(d_model,), activation='linear') for _ in range(4)]
+            self.layers = [Dense(d_model, input_shape=(d_model,), activation=ACT) for _ in range(4)]
 
             def sampling(args):
                 z_mean_, z_logvar_ = args
@@ -614,7 +602,7 @@ class DecoderFromLatent():
 
         # Don't want encoder mask as there should be no padding from latent dim
         enc_mask = None
-        #Lambda(lambda x: GetPadMask(x[0], x[1]), name='DecoderEncMask')([tgt_seq, src_seq])
+        # Lambda(lambda x: GetPadMask(x[0], x[1]), name='DecoderEncMask')([tgt_seq, src_seq])
 
         pr = Lambda(lambda x: tf.Print(x, [x], "\nDECODER ENC_MASK: ", summarize=100))
         # enc_mask = pr(enc_mask)
@@ -643,8 +631,6 @@ class Decoder():
             self.bridge = Dense(d_model, input_shape=(latent_dim,))
         else:
             self.bridge = None
-
-
 
     def __call__(self, tgt_seq, tgt_pos, src_seq, enc_output, return_att=False, active_layers=999):
         if self.bridge is not None:
