@@ -70,12 +70,12 @@ class AttnParams:
             "latent_dim": 32,  # 64
             "ID_d_model": 16,
             "ID_d_inner_hid": 32,
-            "ID_n_head": 8,
+            "ID_n_head": 4,
             "ID_d_k": 4,
             "ID_d_v": 4,
             "ID_layers": 1,
-            "ID_width": 2,
-            "epsilon": 0.01,
+            "ID_width": 1,
+            "epsilon": 1,
             "pp_epochs": 15,
             "pp_layers": 3,
             "model_arch": "TRANSFORMER",
@@ -126,7 +126,11 @@ class TokenList:
         self.id2t = ['<PAD>', '<UNK>', '<S>', '</S>'] + token_list
         self.t2id = {v: k for k, v in enumerate(self.id2t)}
 
+
     def id(self, x):
+        if x not in self.t2id:
+            print("MISSING TOKEN???")
+            print("REQUESTED ID FOR TOKEN {}".format(x))
         return self.t2id.get(x, 1)
 
     def token(self, x):
@@ -183,7 +187,8 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
 
         # Get structures
         for seq in data:
-            Ps.append(QED(Chem.MolFromSmiles(seq[0])))
+            # Ps.append(QED(Chem.MolFromSmiles(seq[0])))
+            Ps.append(0)
             Xs.append(list(seq))
 
         # Split testing and training data
@@ -227,9 +232,21 @@ def SmilesToArray(xs, tokens, max_len=999):
     for i, x in enumerate(xs):
         # print("Padding {}".format(x))
         x = x[:max_len - 2]
+
+        skipnext = False
+        k = 1
         for j, z in enumerate(list(x)):
-            X[i, 1 + j] = tokens.id(z)
-        X[i, 1 + len(x)] = tokens.endid()
+            if skipnext:
+                skipnext = False
+            else:
+                if x[j:j+2] in tokens.id2t and j+1 != len(x):
+                    X[i, k] = tokens.id(x[j:j+2])
+                    skipnext = True
+                else:
+                    X[i, k] = tokens.id(z)
+                k = k + 1
+
+        X[i, k] = tokens.endid()
 
     return X
 
