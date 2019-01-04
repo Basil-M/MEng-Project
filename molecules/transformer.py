@@ -304,7 +304,7 @@ class AvgLatent():
         self.mean_layer = Dense(latent_dim, input_shape=(d_model,), name='mean_layer')
         self.logvar_layer = Dense(latent_dim, input_shape=(d_model,), name='logvar_layer')
         self.mult = Multiply()
-        
+
     def __call__(self, encoder_output):
         # encoder output should be [batch size, d_model, length]
         h = encoder_output
@@ -315,8 +315,8 @@ class AvgLatent():
         a_vals = self.attn(h)  # will be [batch_size, 1, length]
 
         a_vals = Softmax(axis=1)(a_vals)
-        pr = Lambda(lambda x: tf.Print(x, [x], "\nA_VALS: ", summarize=1000))
-        a_vals = pr(a_vals)
+        # pr = Lambda(lambda x: tf.Print(x, [x], "\nA_VALS: ", summarize=1000))
+        # a_vals = pr(a_vals)
         # a_vals = Lambda(lambda x: K.permute_dimensions(x, (0, 2, 1)))(a_vals)
         # a_vals = Lambda(K.transpose)(a_vals)
 
@@ -328,8 +328,8 @@ class AvgLatent():
         h = Lambda(lambda x: K.squeeze(x, 1))(h)
         # h = self.avg(h)
         h = self.after_avg(h)
-        pr = Lambda(lambda x: tf.Print(x, [x], "\nPRE MEAN LAYER: ", summarize=1000))
-        h = pr(h)
+        # pr = Lambda(lambda x: tf.Print(x, [x], "\nPRE MEAN LAYER: ", summarize=1000))
+        # h = pr(h)
         return self.mean_layer(h), self.logvar_layer(h)
 
 
