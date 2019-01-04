@@ -9,7 +9,7 @@ from keras.objectives import binary_crossentropy
 import tensorflow as tf
 from keras.preprocessing.sequence import pad_sequences
 
-
+from keras.layers.merge import multiply
 # try:
 #     from dataloader import TokenList, pad_to_longest
 # # for transformer
@@ -291,25 +291,46 @@ class VariationalEncoder():
 NUM_LAYERS = 5
 ACT = 'relu'
 
+
 class AvgLatent():
     def __init__(self, d_model, latent_dim):
-        self.layers = [Dense(d_model, input_shape=(d_model,), activation='relu') for _ in range(NUM_LAYERS)]
+        self.layers = [Dense(d_model, input_shape=(d_model,), activation='relu') for _ in range(1)]
 
         # self.trans = Dense(d_model, input_shape=(d_model,))
 
         self.avg = Lambda(lambda x: tf.reduce_sum(x, axis=1))
-        self.after_avg = Dense(d_model, input_shape=(d_model,));
+        self.attn = Dense(1, input_shape=(d_model,), activation='linear')
+        self.after_avg = Dense(d_model, input_shape=(d_model,))
         self.mean_layer = Dense(latent_dim, input_shape=(d_model,), name='mean_layer')
         self.logvar_layer = Dense(latent_dim, input_shape=(d_model,), name='logvar_layer')
-
+        self.mult = Multiply()
+        
     def __call__(self, encoder_output):
+        # encoder output should be [batch size, d_model, length]
         h = encoder_output
+
         for layer in self.layers:
             h = layer(h)
-        h = self.avg(h)
-        h = self.after_avg(h)
-        return self.mean_layer(h), self.logvar_layer(h)
 
+        a_vals = self.attn(h)  # will be [batch_size, 1, length]
+
+        a_vals = Softmax(axis=1)(a_vals)
+        pr = Lambda(lambda x: tf.Print(x, [x], "\nA_VALS: ", summarize=1000))
+        a_vals = pr(a_vals)
+        # a_vals = Lambda(lambda x: K.permute_dimensions(x, (0, 2, 1)))(a_vals)
+        # a_vals = Lambda(K.transpose)(a_vals)
+
+        # h = merge([a_vals, h], mode='mul')
+        # h = Lambda(multiply)([a_vals, h])
+        # h = self.mult([a_vals, h])
+        # h = Multiply()([a_vals, h])
+        h = Dot(axes=1)([a_vals, h])
+        h = Lambda(lambda x: K.squeeze(x, 1))(h)
+        # h = self.avg(h)
+        h = self.after_avg(h)
+        pr = Lambda(lambda x: tf.Print(x, [x], "\nPRE MEAN LAYER: ", summarize=1000))
+        h = pr(h)
+        return self.mean_layer(h), self.logvar_layer(h)
 
 
 class Vec2Variational():
@@ -325,7 +346,6 @@ class Vec2Variational():
         # src_seq not used; just included to match
         # calling structure of other decoders
         return self.mean_layer(h), self.logvar_layer(h)
-
 
 
 class RNNDecoder():

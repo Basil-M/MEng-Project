@@ -445,6 +445,7 @@ class TriTransformer:
         print("Finished setting up decoder.")
 
         z_sampled, dec_input = self.latent_to_decoder(z_mean, z_logvar)
+
         dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq,
                                                          tgt_pos,
                                                          z_sampled,
@@ -452,7 +453,6 @@ class TriTransformer:
                                                          active_layers=active_layers,
                                                          return_att=True)
         final_output = self.target_layer(dec_output)
-
 
         # Property prediction
         if self.latent_dim is None:
