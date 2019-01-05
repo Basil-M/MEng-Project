@@ -691,7 +691,7 @@ class LRSchedulerPerStep(Callback):
 
 class LRSchedulerPerEpoch(Callback):
     def __init__(self, d_model, warmup=4000, num_per_epoch=1000):
-        self.basic = 100*(d_model ** -0.5)
+        self.basic = (d_model ** -0.5)
         self.warm = warmup ** -1.5
         self.num_per_epoch = num_per_epoch
         self.step_num = 1

@@ -489,7 +489,11 @@ class TriTransformer:
                 print("No VAE loss!")
                 return reconstruction_loss
             else:
-                kl_loss = - 0.5 * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_), name='KL_loss_sum')
+                if self.stddev == 0.01:
+                    kl_loss = - 0.5 * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_), name='KL_loss_sum')
+                else:
+                    kl_loss = - 0.5 * tf.reduce_sum(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_),
+                                                     name='KL_loss_sum')
                 return reconstruction_loss + kl_loss
 
         def get_accu(args):
