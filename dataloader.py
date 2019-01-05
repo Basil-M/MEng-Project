@@ -60,14 +60,14 @@ class AttnParams:
             "ae_trained": False,
             "batch_size": 64,
             "len_limit": 120,
-            "d_model": 64,
+            "d_model": 256,
             "d_inner_hid": 512,
             "n_head": 8,
-            "d_k": 8,
-            "d_v": 8,
+            "d_k": 12,
+            "d_v": 12,
             "layers": 1,
             "dropout": 0.1,
-            "latent_dim": 64,  # 64
+            "latent_dim": 196,  # 64
             "ID_d_model": 16,
             "ID_d_inner_hid": 32,
             "ID_n_head": 4,

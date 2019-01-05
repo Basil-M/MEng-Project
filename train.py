@@ -25,7 +25,7 @@ RANDOM_SEED = 1103
 DATA = 'data/zinc_100k.txt'
 MODEL_ARCH = 'TRANSFORMER'
 MODEL_NAME = 'attn'
-MODEL_NAME = 'ATTNAVG2'
+MODEL_NAME = 'ATTNAVG_HIGHLR'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -196,8 +196,6 @@ def main():
             data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
                                                                                h5_file=d_file.replace('.txt',
                                                                                                       '_data.h5'))
-        print("TRAIN NANS: {}".format(np.sum(np.isnan(data_train))))
-        print("TEST NANS: {}".format(np.sum(np.isnan(data_test))))
         # Set up model
         for arg in vars(args):
             if arg in params.params:
@@ -288,7 +286,7 @@ def main():
 
         # Set up epoch tracking callback
         ep_track = epoch_track(params, param_filename=param_filename)
-
+        current_epoch = params.get("current_epoch")
         # Train model
         try:
             if not params.get("ae_trained"):

@@ -339,8 +339,8 @@ class Vec2Variational():
     '''
 
     def __init__(self, d_model, max_len):
-        self.mean_layer = Dense(d_model, input_shape=(d_model,), activation=ACT)
-        self.logvar_layer = Dense(d_model, input_shape=(d_model,), activation=ACT)
+        self.mean_layer = Dense(d_model, input_shape=(d_model,))
+        self.logvar_layer = Dense(d_model, input_shape=(d_model,))
 
     def __call__(self, h):
         # src_seq not used; just included to match
@@ -691,7 +691,7 @@ class LRSchedulerPerStep(Callback):
 
 class LRSchedulerPerEpoch(Callback):
     def __init__(self, d_model, warmup=4000, num_per_epoch=1000):
-        self.basic = d_model ** -0.5
+        self.basic = 100*(d_model ** -0.5)
         self.warm = warmup ** -1.5
         self.num_per_epoch = num_per_epoch
         self.step_num = 1
