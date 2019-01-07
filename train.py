@@ -18,17 +18,19 @@ config.gpu_options.allow_growth = True
 k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
-NUM_EPOCHS = 5
-BATCH_SIZE = 30
+NUM_EPOCHS = 1
+BATCH_SIZE = 20
 LATENT_DIM = 128
-RANDOM_SEED = 1103
-DATA = 'data/zinc_100k.txt'
+RANDOM_SEED = 14029
+DATA = 'data/zinc_1k.txt'
+# DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
 MODEL_NAME = 'attn'
-MODEL_NAME = 'ATTNAVG_HIGHLR'
+MODEL_NAME = 'PP3'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
+tf.logging.set_verbosity(tf.logging.ERROR)
 from tensorflow import ConfigProto, Session
 from keras.backend.tensorflow_backend import set_session
 
@@ -351,10 +353,10 @@ def main():
                     pass
 
                 print("Training property predictor")
-                model.property_predictor.fit(z_train, np.expand_dims(props_train, 3),
+                model.property_predictor.fit(z_train, props_train,
                                              batch_size=params.get("batch_size"), epochs=params.get("pp_epochs"),
                                              initial_epoch=params.get("current_epoch") - 1,
-                                             validation_data=(z_test, np.expand_dims(props_test, 3)),
+                                             validation_data=(z_test, props_test),
                                              callbacks=[model_saver, best_model_saver, tbCallback, ep_track])
 
                 try:

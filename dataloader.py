@@ -60,16 +60,16 @@ class AttnParams:
             "ae_trained": False,
             "batch_size": 64,
             "len_limit": 120,
-            "d_model": 256,
-            "d_inner_hid": 512,
-            "n_head": 8,
-            "d_k": 12,
-            "d_v": 12,
+            "d_model": 24,
+            "d_inner_hid": 192,
+            "n_head": 4,
+            "d_k": 4,
+            "d_v": 4,
             "layers": 1,
             "dropout": 0.1,
-            "latent_dim": 196,  # 64
-            "ID_d_model": 16,
-            "ID_d_inner_hid": 32,
+            "latent_dim": 64,  # 64
+            "ID_d_model": 24,
+            "ID_d_inner_hid": 192,
             "ID_n_head": 4,
             "ID_d_k": 4,
             "ID_d_v": 4,
@@ -108,7 +108,10 @@ class AttnParams:
         m_len = max([len(key) for key in self._params])
 
         for key in self._params:
-            print("\t{}  {}".format(key.ljust(m_len), self._params[key]))
+            if "ID" in key and self._params["bottleneck"] != "interim_decoder":
+                pass
+            else:
+                print("\t{}  {}".format(key.ljust(m_len), self._params[key]))
 
     def equals(self, other_params):
         for key in self._params:
@@ -187,8 +190,8 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
 
         # Get structures
         for seq in data:
-            # Ps.append(QED(Chem.MolFromSmiles(seq[0])))
-            Ps.append(0)
+            Ps.append(QED(Chem.MolFromSmiles(seq[0])))
+            # Ps.append(0)
             Xs.append(list(seq))
 
         # Split testing and training data
@@ -328,16 +331,16 @@ def separableTest(num_per_class, num_classes, max_len, num_chars_each=15):
 
 def MarkovSimData(num_per_class, max_len):
     # num_chars_each = min(num_chars_each, np.floor(255/num_classes))
-    min_len = np.ceil(max_len / 3)
+    min_len = np.ceil(max_len / 2)
     tokens = ['A', 'B', 'C', 'D']
 
     p1 = np.array([[0.9, 0.1, 0.0, 0.0],
                    [0.0, 0.2, 0.8, 0.0],
-                   [0.0, 0.2, 0.3, 0.5],
-                   [0.1, 0.3, 0.5, 0.0]])
+                   [0.0, 0.25, 0.35, 0.5],
+                   [0.15, 0.35, 0.5, 0.0]])
 
     p2 = np.array([[0.0, 0.0, 0.0, 1.0],
-                   [0.0, 0.2, 0.3, 0.5],
+                   [0.0, 0.2, 0.3, 0.6],
                    [1.0, 0.0, 0.0, 0.0],
                    [0.8, 0.1, 0.05, 0.05]])
 
@@ -348,7 +351,7 @@ def MarkovSimData(num_per_class, max_len):
     num_test = int(np.ceil(0.2 * num_per_class))
     for k in range(2):
         if k == 1:
-            F = np.cumsum(p1, 1)
+            P = np.cumsum(p1, 1)
         else:
             P = np.cumsum(p2, 1)
 
@@ -357,9 +360,11 @@ def MarkovSimData(num_per_class, max_len):
         for i in range(num_per_class):
             # randomly choose first one
             seq = [tokens[np.random.randint(0, len(tokens))]]
-            while (len(seq) < max_len + 1):
+            seq_len = np.random.randint(min_len, max_len) + 1
+            while len(seq) < seq_len+1:
                 # get corresponding row to sample from
                 pi = P[tokens.index(seq[-1]), :]
+
                 symb = np.where(pi > np.random.rand())[0][0]
                 seq.append(tokens[symb])
             seq = ''.join(seq)
@@ -368,7 +373,8 @@ def MarkovSimData(num_per_class, max_len):
         for i in range(num_test):
             # randomly choose first one
             seq = [tokens[np.random.randint(0, len(tokens))]]
-            while (len(seq) < max_len + 1):
+            seq_len = np.random.randint(min_len, max_len) + 1
+            while len(seq) < seq_len+1:
                 # get corresponding row to sample from
                 pi = P[tokens.index(seq[-1]), :]
                 symb = np.where(pi > np.random.rand())[0][0]
