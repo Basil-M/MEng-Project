@@ -12,6 +12,8 @@ from rdkit import Chem
 from rdkit.Chem.Descriptors import MolWt
 from rdkit.Chem.Crippen import MolLogP as LogP
 from rdkit.Chem.QED import qed as QED
+from utils import calculateScore as SAS
+
 from keras.utils import Sequence
 
 
@@ -204,9 +206,9 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
         for seq in data:
             mol = Chem.MolFromSmiles(seq)
 
-            Ps.append([QED(mol), LogP(mol), MolWt(mol)])
+            Ps.append([QED(mol), LogP(mol), MolWt(mol), SAS(mol)])
 
-            Xs.append(list(seq))
+            Xs.append(seq)
 
         # Split testing and training data
         # TODO(Basil): Fix ugly hack with the length of Xs...
@@ -235,10 +237,10 @@ def SmilesToArray(xs, tokens, max_len=999):
     :param max_len: Maximum length to pad to
     :return: Array of tokenized smiles
     '''
-    if isinstance(xs, str):
-        xs = [xs]
-    elif isinstance(xs[0], list):
-        xs = [x[0] for x in xs]
+    # if isinstance(xs, str):
+    #     xs = [xs]
+    # elif isinstance(xs[0], list):
+    #     xs = [x[0] for x in xs]
 
     # find longest string
     longest = np.max([len(x) for x in xs])
