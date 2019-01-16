@@ -22,7 +22,8 @@ DEFAULTS = {
 
 def get_arguments():
     parser = argparse.ArgumentParser(description='Download ChEMBL entries and convert them to input for preprocessing')
-    parser.add_argument('--dataset', type=str, help="%s  ...or specify your own --uri" % ", ".join(DEFAULTS.keys()))
+    parser.add_argument('--dataset', type=str, help="%s  ...or specify your own --uri" % ", ".join(DEFAULTS.keys()),
+                        default='zinc12')
     parser.add_argument('--uri', type=str, help='URI to download ChEMBL entries from')
     parser.add_argument('--outfile', type=str, help='Output file name')
     args = parser.parse_args()

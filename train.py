@@ -6,27 +6,29 @@ import h5py
 import numpy as np
 
 from keras.optimizers import Adam
-from keras.callbacks import Callback
-from molecules.transformer import LRSchedulerPerStep, LRSchedulerPerEpoch
+from molecules.transformer import LRSchedulerPerStep
 from os.path import exists
 from os import mkdir, remove
 import tensorflow as tf
 from keras import backend as k
+
+from utils import epoch_track, WeightAnnealer_epoch, load_dataset
 
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
-NUM_EPOCHS = 1
+NUM_EPOCHS = 40
 BATCH_SIZE = 20
 LATENT_DIM = 128
 RANDOM_SEED = 14029
 DATA = 'data/zinc_1k.txt'
+# DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
 MODEL_NAME = 'attn'
-MODEL_NAME = 'PP3'
+MODEL_NAME = 'joint4'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -39,27 +41,6 @@ from keras.backend.tensorflow_backend import set_session
 config = ConfigProto()
 config.gpu_options.allow_growth = True
 set_session(Session(config=config))
-
-
-class epoch_track(Callback):
-    def __init__(self, params, param_filename):
-        self._params = params
-        self._filename = param_filename
-
-    def on_epoch_end(self, epoch, logs={}):
-        self._params.set("current_epoch", self._params.get("current_epoch") + 1)
-        self._params.save(self._filename)
-        return
-
-    def on_train_end(self, logs={}):
-        if not self._params.get("ae_trained"):
-            self._params.set("current_epoch", 1)
-            self._params.set("ae_trained", True)
-        self._params.save(self._filename)
-        return
-
-    def epoch(self):
-        return self._params.get("current_epoch")
 
 
 def get_arguments():
@@ -86,6 +67,11 @@ def get_arguments():
                         help='Model architecture to use - options are VAE, TRANSFORMER')
     parser.add_argument('--base_lr', type=float, metavar='0.001', default=0.001,
                         help='Base training rate for ADAM optimizer')
+    parser.add_argument('--kl_weight_init', type=float, metavar='0.1', default=default.get("kl_weight_init"),
+                        help='Initial weighting used for KL loss')
+    parser.add_argument('--kl_weight_inc', type=float, metavar='1.5', default=default.get("kl_weight_inc"),
+                        help='Amount to increment KL loss weighting by each epoch')
+
     parser.add_argument('--gen', help='Whether to use generator for data', default=False)
 
     ### BOTTLENECK PARAMETERS
@@ -101,7 +87,7 @@ def get_arguments():
                         help='Dimensionality of interim decoder attention keys')
     parser.add_argument('--ID_d_v', type=int, metavar='N', default=default.get("ID_d_v"),
                         help='Dimensionality of interim decoder attention values')
-    parser.add_argument('--ID_n_head', type=int, metavar='N', default=default.get("ID_n_head"),
+    parser.add_argument('--ID_heads', type=int, metavar='N', default=default.get("ID_heads"),
                         help='Number of interim decoder attention heads to use')
     parser.add_argument('--ID_layers', type=int, metavar='N', default=default.get("ID_layers"),
                         help='Number of interim decoder layers')
@@ -117,14 +103,14 @@ def get_arguments():
                         help='Dimensionality of attention keys')
     parser.add_argument('--d_v', type=int, metavar='N', default=default.get("d_v"),
                         help='Dimensionality of attention values')
-    parser.add_argument('--n_head', type=int, metavar='N', default=default.get("n_head"),
+    parser.add_argument('--heads', type=int, metavar='N', default=default.get("heads"),
                         help='Number of attention heads to use')
     parser.add_argument('--layers', type=int, metavar='N', default=default.get("layers"),
                         help='Number of encoder/decoder layers')
 
     parser.add_argument('--dropout', type=float, metavar='0.1', default=default.get("dropout"),
                         help='Dropout to use in autoencoder')
-    parser.add_argument('--epsilon', type=float, metavar='0.01', default=default.get("epsilon"),
+    parser.add_argument('--stddev', type=float, metavar='0.01', default=default.get("stddev"),
                         help='Standard deviation of variational sampler')
 
     ### PROPERTY PREDICTOR PARAMETERS
@@ -146,8 +132,6 @@ def main():
     from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, TensorBoard
     ## VARIATIONAL AUTOENCODER
     if args.model_arch == "VAE":
-        from molecules.utils import one_hot_array, one_hot_index, from_one_hot_array, \
-            decode_smiles_from_indexes, load_dataset
 
         from molecules.model import MoleculeVAE as model_arch
         data_train, data_test, charset = load_dataset(args.data)
@@ -256,23 +240,25 @@ def main():
         model = model_arch(tokens, params)
 
         # Learning rate scheduler
-        lr_scheduler = LRSchedulerPerStep(params.get("d_model"),
-                                          int(4/args.base_lr))  # there is a warning that it is slow, however, it's ok.
+        callbacks = []
+        callbacks.append(LRSchedulerPerStep(params.get("d_model"),
+                                          int(4/args.base_lr)))  # there is a warning that it is slow, however, it's ok.
 
         # Model saver
-        model_saver = ModelCheckpoint(MODEL_DIR + "model.h5", save_best_only=False,
-                                      save_weights_only=True)
+        callbacks.append(ModelCheckpoint(MODEL_DIR + "model.h5", save_best_only=False,
+                                      save_weights_only=True))
 
-        best_model_saver = ModelCheckpoint(MODEL_DIR + "best_model.h5", save_best_only=True,
-                                           save_weights_only=True)
+        # Best model saver
+        callbacks.append(ModelCheckpoint(MODEL_DIR + "best_model.h5", save_best_only=True,
+                                           save_weights_only=True))
 
         # Tensorboard Callback
-        tbCallback = TensorBoard(log_dir=MODEL_DIR + "logdir/",
+        callbacks.append(TensorBoard(log_dir=MODEL_DIR + "logdir/",
                                  histogram_freq=0,
                                  batch_size=args.batch_size,
                                  write_graph=True,
                                  write_images=True,
-                                 update_freq='batch')
+                                 update_freq='batch'))
 
         if args.bottleneck == "none":
             model.compile_vae(Adam(args.base_lr, 0.9, 0.98))
@@ -287,8 +273,12 @@ def main():
             params.save(param_filename)
 
         # Set up epoch tracking callback
-        ep_track = epoch_track(params, param_filename=param_filename)
+        callbacks.append(epoch_track(params, param_filename=param_filename))
         current_epoch = params.get("current_epoch")
+        # Weight annealer callback
+        if params.get("stddev") != 0 and params.get("stddev") is not None:
+            callbacks.append(WeightAnnealer_epoch(model.kl_loss_var, start_val = params.get("kl_weight_init"), b = params.get("kl_weight_inc")))
+
         # Train model
         try:
             if not params.get("ae_trained"):
@@ -298,19 +288,24 @@ def main():
                 if exists(MODEL_DIR + "latents.h5"):
                     remove(MODEL_DIR + "latents.h5")
 
-                if args.gen:
+                if args.gen and params.get("pp_weight") == 0.0:
                     print("Using generator for data!")
                     model.autoencoder.fit_generator(gen.train_data, None,
                                                     epochs=args.epochs, initial_epoch=current_epoch - 1,
                                                     validation_data=gen.test_data,
-                                                    callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback,
-                                                               ep_track])
+                                                    callbacks=callbacks)
                 else:
+                    if params.get("pp_weight") == 0.0:
+                        train = data_train
+                        test = data_test
+                    else:
+                        train = [data_train, props_train];
+                        test = [data_test, props_test];
                     print("Not using generator for data.")
-                    model.autoencoder.fit(data_train, None, batch_size=args.batch_size,
+                    model.autoencoder.fit(train, None, batch_size=args.batch_size,
                                           epochs=args.epochs, initial_epoch=current_epoch - 1,
-                                          validation_data=(data_test, None),
-                                          callbacks=[lr_scheduler, model_saver, best_model_saver, tbCallback, ep_track])
+                                          validation_data=(test, None),
+                                          callbacks=callbacks)
 
             if params.get("bottleneck") != "nppe":
                 print("Autoencoder training complete. Loading best model.")
@@ -366,7 +361,8 @@ def main():
             else:
                 print("No bottleneck, so cannot train property prediction model")
         except KeyboardInterrupt:
-            print("Interrupted on epoch {}".format(ep_track.epoch()))
+            # print("Interrupted on epoch {}".format(ep_track.epoch()))
+            print("Training interrupted.")
 
 
 if __name__ == '__main__':

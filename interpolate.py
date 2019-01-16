@@ -6,8 +6,7 @@ import os
 import argparse
 import sample
 from molecules.model import MoleculeVAE
-from molecules.utils import decode_smiles_from_indexes
-from molecules.utils import one_hot_array, one_hot_index
+from utils import one_hot_array, one_hot_index, decode_smiles_from_indexes
 
 SOURCE = 'Cc1ccnc(c1)NC(=O)Cc2cccc3c2cccc3'
 DEST = 'c1cc(cc(c1)Cl)NNC(=O)c2cc(cnc2)Br'

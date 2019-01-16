@@ -7,8 +7,7 @@ import numpy as np
 import sys
 
 from molecules.model import MoleculeVAE
-from molecules.utils import one_hot_array, one_hot_index, from_one_hot_array, \
-    decode_smiles_from_indexes, load_dataset
+from utils import one_hot_array, one_hot_index, from_one_hot_array, decode_smiles_from_indexes, load_dataset
 from molecules.vectorizer import SmilesDataGenerator
 
 LATENT_DIM = 292

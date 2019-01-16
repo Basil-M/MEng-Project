@@ -2,7 +2,7 @@ import os, sys, time, random
 
 from typing import Dict, Any, Union
 
-import ljqpy
+import utils
 import h5py
 import numpy as np
 import time
@@ -56,13 +56,16 @@ class AttnParams:
         self._params = {
             "d_file": None,
             "current_epoch": 1,
-            "epochs": 5,
+            "epochs": 50,
+            "kl_weight_init": 0.1,
+            "kl_weight_inc": 1.5,
+            "pp_weight": 0,
             "ae_trained": False,
             "batch_size": 64,
             "len_limit": 120,
             "d_model": 24,
             "d_inner_hid": 192,
-            "n_head": 4,
+            "heads": 4,
             "d_k": 4,
             "d_v": 4,
             "layers": 1,
@@ -70,16 +73,16 @@ class AttnParams:
             "latent_dim": 64,  # 64
             "ID_d_model": 24,
             "ID_d_inner_hid": 192,
-            "ID_n_head": 4,
+            "ID_heads": 4,
             "ID_d_k": 4,
             "ID_d_v": 4,
             "ID_layers": 1,
             "ID_width": 1,
-            "epsilon": 0,
+            "stddev": 1,
             "pp_epochs": 15,
             "pp_layers": 3,
             "model_arch": "TRANSFORMER",
-            "bottleneck": "average"
+            "bottleneck": "none"
         }
 
     def get(self, param):
@@ -129,7 +132,6 @@ class TokenList:
         self.id2t = ['<PAD>', '<UNK>', '<S>', '</S>'] + token_list
         self.t2id = {v: k for k, v in enumerate(self.id2t)}
 
-
     def id(self, x):
         if x not in self.t2id:
             print("MISSING TOKEN???")
@@ -152,22 +154,22 @@ class TokenList:
 def MakeSmilesDict(fn=None, min_freq=5, dict_file=None):
     if dict_file is not None and os.path.exists(dict_file):
         print('Loading preprocessed dictionary file {}'.format(dict_file))
-        lst = ljqpy.LoadList(dict_file)
+        lst = utils.LoadList(dict_file)
     else:
         print("Creating dictionary file {}".format(dict_file))
-        data = ljqpy.LoadCSV(fn)
+        data = utils.LoadList(fn)
         wdicts = [{}, {}]
         for ss in data:
             for seq, wd in zip(ss, wdicts):
                 for w in seq:
                     wd[w] = wd.get(w, 0) + 1
 
-        wd = ljqpy.FreqDict2List(wd)
+        wd = utils.FreqDict2List(wd)
         lst = [x for x, y in wd if y >= min_freq]
 
         # Save dictionary
         if dict_file is not None:
-            ljqpy.SaveList(lst, dict_file)
+            utils.SaveList(lst, dict_file)
 
         print('Vocabulary size is {}'.format(len(lst)))
 
@@ -183,14 +185,14 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
             test_pps, train_pps = dfile['test_props'][:], dfile['train_props'][:]
     else:
         print("Processing data from {}".format(fn))
-        data = ljqpy.LoadCSVg(fn)
+        data = utils.LoadList(fn)
 
         Xs = []
         Ps = []
 
         # Get structures
         for seq in data:
-            Ps.append(QED(Chem.MolFromSmiles(seq[0])))
+            Ps.append(QED(Chem.MolFromSmiles(seq)))
             # Ps.append(0)
             Xs.append(list(seq))
 
@@ -242,8 +244,8 @@ def SmilesToArray(xs, tokens, max_len=999):
             if skipnext:
                 skipnext = False
             else:
-                if x[j:j+2] in tokens.id2t and j+1 != len(x):
-                    X[i, k] = tokens.id(x[j:j+2])
+                if x[j:j + 2] in tokens.id2t and j + 1 != len(x):
+                    X[i, k] = tokens.id(x[j:j + 2])
                     skipnext = True
                 else:
                     X[i, k] = tokens.id(z)
@@ -361,7 +363,7 @@ def MarkovSimData(num_per_class, max_len):
             # randomly choose first one
             seq = [tokens[np.random.randint(0, len(tokens))]]
             seq_len = np.random.randint(min_len, max_len) + 1
-            while len(seq) < seq_len+1:
+            while len(seq) < seq_len + 1:
                 # get corresponding row to sample from
                 pi = P[tokens.index(seq[-1]), :]
 
@@ -374,7 +376,7 @@ def MarkovSimData(num_per_class, max_len):
             # randomly choose first one
             seq = [tokens[np.random.randint(0, len(tokens))]]
             seq_len = np.random.randint(min_len, max_len) + 1
-            while len(seq) < seq_len+1:
+            while len(seq) < seq_len + 1:
                 # get corresponding row to sample from
                 pi = P[tokens.index(seq[-1]), :]
                 symb = np.where(pi > np.random.rand())[0][0]

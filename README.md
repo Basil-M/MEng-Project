@@ -5,17 +5,15 @@ This work aims to adapt [Google's solely attention-based architecture](https://a
 As mentioned, it is primarily based on Google's transformer architecture. It builds upon [preceding work](https://arxiv.org/abs/1610.02415) by Aspuru-Guzik et al; by using a string representation of molecules, they were able to leverage an NLP approach to convert the discrete representation of molecules to a continuous latent representation. A property predictor is trained on this latent representation. A continuous latent representation allows for efficient search and optimisation techniques, opening avenues for numerous methods for generating novel chemical structures.
 
 ## Credits
-This work builds on [Max Hodak's implementation](https://github.com/maxhodak/keras-molecules) and [Lsdefine's implementation](https://github.com/Lsdefine/attention-is-all-you-need-keras) of the Transformer architecture.
+This work builds on [Max Hodak's implementation](https://github.com/maxhodak/keras-molecules) of the Molecule Autoencoder and [Lsdefine's implementation](https://github.com/Lsdefine/attention-is-all-you-need-keras) of the Transformer architecture.
 
 ## Requirements
 
-Install using `pip install -r requirements.txt` or build a docker container: `docker build .`
+Install using `pip install -r requirements.txt`.
 
-The docker container can also be built different TensorFlow binary, for example in order to use GPU:
-
-`docker build --build-arg TF_BINARY_URL=https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.11.0rc1-cp27-none-linux_x86_64.whl .`
-
-You'll need to ensure the proper CUDA libraries are installed for this version to work.
+You'll need to ensure the proper CUDA libraries are installed for this version to work. It is suggested that Tensorflow and RDKit be installed via anaconda:
+`conda install -c rdkit rdkit`
+`conda install -c anaconda tensorflow-gpu `
 
 ## Getting the datasets
 
@@ -31,41 +29,91 @@ To download original datasets to work with, you can use the `download_dataset.py
 
 ## Preparing the data
 
-To train the network you need a lot of SMILES strings. The `preprocess.py` script assumes you have an HDF5 file that contains a table structure, one column of which is named `structure` and contains one SMILES string no longer than 120 characters per row. The script then:
+Training the network requires a subset of SMILES strings. At least 100k is suggested. This must be preprocessed before training.
+The `preprocess.py` script assumes you have an HDF5 file that contains a table structure, one column of which is named `structure` and contains one SMILES string no longer than 120 characters per row.
+The recursive VAE and the Transformer models take inputs in different forms, so the choice of model must be specified.
 
+For the recursive VAE, the preprocess script will:
+  
 - Normalizes the length of each string to 120 by appending whitespace as needed.
 - Builds a list of the unique characters used in the dataset. (The "charset")
 - Substitutes each character in each SMILES string with the integer ID of its location in the charset.
 - Converts each character position to a one-hot vector of len(charset).
 - Saves this matrix to the specified output file.
 
-Example:
+For the Transformer, the preprocess script will:
 
-`python preprocess.py data/smiles_50k.h5 data/processed.h5`
+- Canonicalise SMILES
+- Save as a list of text files 
+
+`python preprocess.py data/smiles_50k.h5 data/trans_processed.h5 --model_arch TRANSFORMER`
+
+`python preprocess.py data/smiles_50k.h5 data/recurs_processed.h5 --model_arch VAE`
 
 ## Training the network
 
-The preprocessed data can be fed into the `train.py` script:
+The training file has a large number of options corresponding to model parameters. The easiest way to figure out how to run it is to run:
 
-`python train.py data/processed.h5 model.h5 --epochs 20`
+`python train.py -h`
 
-If a model file already exists it will be opened and resumed. If it doesn't exist, it will be created.
+### Parameters
+General parameters related to training/model definition are shown below
 
-By default, the latent space is 292-D per the paper, and is configurable with the `--latent_dim` flag. If you use a non-default latent dimensionality don't forget to use `--latent_dim` on the other scripts (eg `sample.py`) when you operate on that model checkpoint file or it will be confused.
+| Parameter      | Description                                            |
+|----------------|--------------------------------------------------------|
+| `--epochs`     | Number of training epochs                              |
+| `--model`      | Name of the models e.g. TAvg_196                       |
+| `--models_dir` | Folder containing model directories                    |
+| `--data`       | Path to preprocessed data file e.g. data/zinc_250k.txt |
+| `--batch_size` | Batch size                                             |
+| `--latent_dim` | Dimensionality of latent space                         |
+| `--stddev`     | Standard deviation of sampling in the latent space. Setting `--stddev 0` will disable variational component.    |
+| `--model_arch` | Model architecture. Options are VAE and TRANSFORMER    |
+| `--dropout`    | Dropout used in the models                             |
 
-## Sampling from a trained model
+### Transformer Parameters
 
-The `sample.py` script can be used to either run the full autoencoder (for testing) or either the encoder or decoder halves using the `--target` parameter. The data file must include a charset field.
+Setting `--model_arch TRANSFORMER` will use the transformer model, which has the following parameters:
 
-Examples:
+| Parameter      | Description                                                                  |
+|----------------|------------------------------------------------------------------------------|
+| `--bottleneck` | Sets architecture of bottleneck. Options are `average` and `interim_decoder` |
+| `--d_model`    | Dimensionality of word embeddings (and thus the entire model)                |
+| `--d_k`        | Dimensionality of keys (and queries) in attention mechanisms                 |
+| `--d_v`        | Dimensionality of values generated in attention mechanisms                   |
+| `--heads`      | Number of attention heads to use                                             |
+| `--layers`     | Number of layers                                                             |
 
-```
-python sample.py data/processed.h5 model.h5 --target autoencoder
+These must be set alongside parameters above. There are currently two choices of bottleneck:
 
-python sample.py data/processed.h5 model.h5 --target encoder --save_h5 encoded.h5
+#### Averaging Bottleneck
+`--bottleneck average`
 
-python sample.py target/encoded.h5 model.h5 --target decoder
-```
+Performs a weighted average over the length of the sequence to yield a vector of size `d_model` 
+which is used to generate means and variances of size `d_latent`.
 
-## Performance
+No extra parameters need to be specified.
 
+#### Interim Decoder Bottleneck
+
+The interim decoder uses a second decoder stack to recursively produce means and variances for the latent space.
+
+This interim decoder can have different parameters to the main Encoder-Decoder stacks - 
+therefore all the above parameters (except for `--bottleneck`) are repeated, prefixed with `ID`; 
+e.g. `--ID_layers ` will set the number of layers in the interim decoder, and `--ID_d_k` will set its key dimensionality.
+
+#### Property predictor 
+The property predictor is a simple dense network with two parameters:
+
+| Parameter     | Description                                                                |
+|---------------|----------------------------------------------------------------------------|
+| `--pp_epochs` | Number of epochs to train property predictor (only if not jointly trained) |
+| `--pp_layers` | Number of property predictor layers                                        |
+
+## Upcoming
+- Joint training of property predictor with autoencoder
+- Annealing of variational loss
+- Model analysis scripts
+- Attention mechanism visualisation scripts
+- More thorough installation guide
+- Sample model results & graphs

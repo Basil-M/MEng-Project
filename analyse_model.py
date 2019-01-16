@@ -6,7 +6,7 @@ from molecules.model import Transformer
 from dataloader import SmilesToArray, AttnParams, MakeSmilesDict, MakeSmilesData
 from keras.optimizers import Adam
 from metakernel.display import display
-from ljqpy import LoadCSV
+from utils import LoadList
 from rdkit import Chem
 from IPython import embed
 
@@ -119,7 +119,7 @@ def main():
 
     # Get data
     d_file = model_params.get("d_file")
-    data = [d[0] for d in LoadCSV(d_file)]  # List of SMILES strings
+    data = [d for d in LoadList(d_file)]  # List of SMILES strings
     tokens = MakeSmilesDict(d_file, dict_file=d_file.replace('.txt', '_dict.txt'))
 
     # Prepare model

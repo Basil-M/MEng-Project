@@ -5,7 +5,7 @@ from sample_latent import visualize_latent_rep
 from molecules.model import Transformer
 from dataloader import SmilesToArray, AttnParams, MakeSmilesDict, MakeSmilesData
 from keras.optimizers import Adam
-from ljqpy import LoadCSV
+from utils import LoadCSV
 from rdkit import Chem
 from scipy.stats import gaussian_kde, rv_histogram, rv_continuous, entropy
 import argparse

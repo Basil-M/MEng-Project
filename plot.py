@@ -9,7 +9,7 @@ import os
 import numpy as np
 
 from molecules.model import MoleculeVAE
-from molecules.utils import load_dataset
+from utils import load_dataset
 
 from pylab import figure, axes, scatter, title, show, savefig
 
