@@ -28,7 +28,7 @@ DATA = 'data/zinc_100k.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
 # MODEL_NAME = 'attn'
-MODEL_NAME = 'testj4'
+MODEL_NAME = 'testj5'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -67,10 +67,14 @@ def get_arguments():
                         help='Model architecture to use - options are VAE, TRANSFORMER')
     parser.add_argument('--base_lr', type=float, metavar='0.001', default=0.001,
                         help='Base training rate for ADAM optimizer')
+
     parser.add_argument('--kl_weight_init', type=float, metavar='0.1', default=default.get("kl_weight_init"),
                         help='Initial weighting used for KL loss')
     parser.add_argument('--kl_weight_inc', type=float, metavar='1.5', default=default.get("kl_weight_inc"),
                         help='Amount to increment KL loss weighting by each epoch')
+
+    parser.add_argument('--pp_weight', type=float, metavar='1.5', default=default.get("pp_weight"),
+                        help='For joint optimisation: Amount to weight MSE loss of property predictor')
 
     parser.add_argument('--gen', help='Whether to use generator for data', default=False)
 
@@ -79,17 +83,18 @@ def get_arguments():
                         help='Dimensionality of the latent representation.')
     parser.add_argument('--bottleneck', type=str, default=default.get("bottleneck"),
                         help='Bottleneck architecture - average, interim_decoder')
-    parser.add_argument('--ID_d_model', type=int, metavar='N', default=default.get("ID_d_model"),
+
+    parser.add_argument('--ID_d_model', type=int, metavar='N', default=None,
                         help='Dimensionality of interim decoder model')
-    parser.add_argument('--ID_d_inner_hid', type=int, metavar='N', default=default.get("ID_d_inner_hid"),
+    parser.add_argument('--ID_d_inner_hid', type=int, metavar='N', default=None,
                         help='Dimensionality of interim decoder fully connected networks after attention layers')
-    parser.add_argument('--ID_d_k', type=int, metavar='N', default=default.get("ID_d_k"),
+    parser.add_argument('--ID_d_k', type=int, metavar='N', default=None,
                         help='Dimensionality of interim decoder attention keys')
-    parser.add_argument('--ID_d_v', type=int, metavar='N', default=default.get("ID_d_v"),
+    parser.add_argument('--ID_d_v', type=int, metavar='N', default=None,
                         help='Dimensionality of interim decoder attention values')
-    parser.add_argument('--ID_heads', type=int, metavar='N', default=default.get("ID_heads"),
+    parser.add_argument('--ID_heads', type=int, metavar='N', default=None,
                         help='Number of interim decoder attention heads to use')
-    parser.add_argument('--ID_layers', type=int, metavar='N', default=default.get("ID_layers"),
+    parser.add_argument('--ID_layers', type=int, metavar='N', default=None,
                         help='Number of interim decoder layers')
     parser.add_argument('--ID_width', type=int, metavar='N', default=default.get("ID_width"),
                         help='Number of interim decoder layers')
@@ -186,6 +191,9 @@ def main():
         for arg in vars(args):
             if arg in params.params:
                 params.set(arg, getattr(args, arg))
+
+        # Handle interim decoder parameters
+        params.setIDparams()
 
         # Create model tracking folder
         if not exists(MODEL_DIR):

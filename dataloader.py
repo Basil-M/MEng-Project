@@ -61,7 +61,7 @@ class AttnParams:
             "epochs": 50,
             "kl_weight_init": 0.05,
             "kl_weight_inc": 1.5,
-            "pp_weight": 5,
+            "pp_weight": 1,
             "ae_trained": False,
             "batch_size": 64,
             "len_limit": 120,
@@ -73,18 +73,18 @@ class AttnParams:
             "layers": 1,
             "dropout": 0.1,
             "latent_dim": 64,  # 64
-            "ID_d_model": 24,
-            "ID_d_inner_hid": 192,
-            "ID_heads": 4,
-            "ID_d_k": 4,
-            "ID_d_v": 4,
-            "ID_layers": 1,
+            "ID_d_model": None,
+            "ID_d_inner_hid": None,
+            "ID_heads": None,
+            "ID_d_k": None,
+            "ID_d_v": None,
+            "ID_layers": None,
             "ID_width": 1,
             "stddev": 1,
             "pp_epochs": 15,
             "pp_layers": 3,
             "model_arch": "TRANSFORMER",
-            "bottleneck": "average"
+            "bottleneck": "interim_decoder"
         }
 
     def get(self, param):
@@ -108,6 +108,14 @@ class AttnParams:
         with open(fn, mode='wb') as f:
             pickle.dump(self._params, f, pickle.HIGHEST_PROTOCOL)
 
+    def setIDparams(self):
+        # Will by default set interim decoder parameters
+        # to have same as normal parameters
+        if self._params["bottleneck"] == "interim_decoder":
+            for key in self._params:
+                if "ID" in key:
+                    if self._params[key] is None:
+                        self._params[key] = self._params[key.replace("ID_", "")]
     def dump(self):
         # get max length
         m_len = max([len(key) for key in self._params])
