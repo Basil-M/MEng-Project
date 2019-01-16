@@ -488,10 +488,11 @@ class TriTransformer:
             latent_vec = z_sampled
 
         h = Dense(latent_dim, activation='linear')(latent_vec)
-        prop_input = Input(shape=[3])
+        num_props = 4
+        prop_input = Input(shape=[num_props])
         for _ in range(self.pp_layers - 1):
             h = Dense(latent_dim, activation='linear')(h)
-        prop_output = Dense(3, activation='linear')(h)
+        prop_output = Dense(num_props, activation='linear')(h)
 
         def rec_loss(args):
             y_pred, y_true = args
