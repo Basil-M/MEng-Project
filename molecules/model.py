@@ -479,16 +479,19 @@ class TriTransformer:
         # Property prediction
         if self.latent_dim is None:
             latent_dim = self.d_model * self.len_limit
-            encoded_input = Input(shape=[self.d_model, self.len_limit], dtype='float', name='latent_rep')
+            latent_vec = Input(shape=[self.d_model, self.len_limit], dtype='float', name='latent_rep')
         else:
             latent_dim = self.latent_dim
-            encoded_input = Input(shape=[latent_dim], dtype='float', name='latent_rep')
+            latent_vec = Input(shape=[latent_dim], dtype='float', name='latent_rep')
 
-        h = Dense(latent_dim, activation='linear')(encoded_input)
-        prop_input = Input(shape=[1])
+        if self.pp_loss_var is not None:
+            latent_vec = z_sampled
+
+        h = Dense(latent_dim, activation='linear')(latent_vec)
+        prop_input = Input(shape=[3])
         for _ in range(self.pp_layers - 1):
             h = Dense(latent_dim, activation='linear')(h)
-        prop_output = Dense(1, activation='linear')(h)
+        prop_output = Dense(3, activation='linear')(h)
 
         def rec_loss(args):
             y_pred, y_true = args
@@ -507,7 +510,8 @@ class TriTransformer:
         def pp_loss(args):
             prop_input_, prop_output_ = args
             SE = K.pow(prop_input_ - prop_output_, 2)
-            return self.pp_loss_var *  K.sqrt(tf.reduce_sum(SE))
+            SE = tf.reduce_sum(SE)
+            return self.pp_loss_var *  K.sqrt(SE)
 
             # def get_loss(args):
             #     y_pred, y_true, z_mean_, z_log_var_ = args
@@ -544,18 +548,23 @@ class TriTransformer:
 
         losses = []
         losses.append(Lambda(rec_loss, name='ReconstructionLoss')([final_output, tgt_true]))
-        if self.kl_loss_var is not None:
-            losses.append(Lambda(kl_loss, name='VariationalLoss')([z_mean, z_logvar]))
 
+        kl = None
+        if self.kl_loss_var is not None:
+            kl = Lambda(kl_loss, name='VariationalLoss')([z_mean, z_logvar])
+            losses.append(kl)
+
+        pp = None
         if self.pp_loss_var is not None:
-            losses.append(Lambda(pp_loss, name='PropertyLoss')([prop_input, z_logvar]))
+            pp = Lambda(pp_loss, name='PropertyLoss')([prop_input, prop_output])
+            losses.append(pp)
 
         loss = Lambda(tf.reduce_sum)(losses)
         # loss = Lambda(get_loss, name='LossFn')([final_output, tgt_true, z_mean, z_logvar])
 
         self.ppl = Lambda(K.exp)(loss)
         self.accu = Lambda(get_accu)([final_output, tgt_true])
-        self.meanz = Lambda(tf.reduce_mean)(z_mean)
+        # self.meanz = Lambda(tf.reduce_mean)(z_mean)
         # For encoding to z
         self.output_latent = Model(src_seq_input, [z_sampled])
 
@@ -568,7 +577,7 @@ class TriTransformer:
 
         # For property prediction
         # if not self.latent_dim is None:
-        self.property_predictor = Model(encoded_input, prop_output)
+        # self.property_predictor = Model(latent_vec, prop_output)
 
         # For outputting next symbol
         self.output_model = Model(src_seq_input, final_output)
@@ -581,18 +590,26 @@ class TriTransformer:
         self.autoencoder.metrics_tensors.append(self.ppl)
         self.autoencoder.metrics_names.append('accu')
         self.autoencoder.metrics_tensors.append(self.accu)
-        self.autoencoder.metrics_names.append('meanmean')
-        self.autoencoder.metrics_tensors.append(self.meanz)
 
-        if self.stddev != 0 and self.stddev is not None:
-            self.autoencoder.metrics_names.append('meanlogvar')
-            self.meanzvar = Lambda(tf.reduce_mean)(z_logvar)
-            self.autoencoder.metrics_tensors.append(self.meanzvar)
+        if pp is not None:
+            self.autoencoder.metrics_names.append('pp_loss')
+            self.autoencoder.metrics_tensors.append(pp)
 
-        session = K.get_session()
-        for layer in self.autoencoder.layers:
-            if hasattr(layer, 'kernel_initializer'):
-                layer.kernel.initializer.run(session=session)
+        if kl is not None:
+            self.autoencoder.metrics_names.append('kl_loss')
+            self.autoencoder.metrics_tensors.append(kl)
+        # self.autoencoder.metrics_names.append('meanmean')
+        # self.autoencoder.metrics_tensors.append(self.meanz)
+
+        # if self.stddev != 0 and self.stddev is not None:
+        #     self.autoencoder.metrics_names.append('meanlogvar')
+        #     self.meanzvar = Lambda(tf.reduce_mean)(z_logvar)
+        #     self.autoencoder.metrics_tensors.append(self.meanzvar)
+
+        # session = K.get_session()
+        # for layer in self.autoencoder.layers:
+        #     if hasattr(layer, 'kernel_initializer'):
+        #         layer.kernel.initializer.run(session=session)
         # self.autoencoder.summary()
         # self.make_fast_decode_model()
 

@@ -9,6 +9,8 @@ import time
 import csv
 import pickle
 from rdkit import Chem
+from rdkit.Chem.Descriptors import MolWt
+from rdkit.Chem.Crippen import MolLogP as LogP
 from rdkit.Chem.QED import qed as QED
 from keras.utils import Sequence
 
@@ -57,17 +59,17 @@ class AttnParams:
             "d_file": None,
             "current_epoch": 1,
             "epochs": 50,
-            "kl_weight_init": 0.1,
+            "kl_weight_init": 0.05,
             "kl_weight_inc": 1.5,
-            "pp_weight": 0,
+            "pp_weight": 5,
             "ae_trained": False,
             "batch_size": 64,
             "len_limit": 120,
-            "d_model": 24,
+            "d_model": 64,
             "d_inner_hid": 192,
-            "heads": 4,
-            "d_k": 4,
-            "d_v": 4,
+            "heads": 8,
+            "d_k": 8,
+            "d_v": 8,
             "layers": 1,
             "dropout": 0.1,
             "latent_dim": 64,  # 64
@@ -82,7 +84,7 @@ class AttnParams:
             "pp_epochs": 15,
             "pp_layers": 3,
             "model_arch": "TRANSFORMER",
-            "bottleneck": "none"
+            "bottleneck": "average"
         }
 
     def get(self, param):
@@ -192,8 +194,10 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
 
         # Get structures
         for seq in data:
-            Ps.append(QED(Chem.MolFromSmiles(seq)))
-            # Ps.append(0)
+            mol = Chem.MolFromSmiles(seq)
+
+            Ps.append([QED(mol), LogP(mol), MolWt(mol)])
+
             Xs.append(list(seq))
 
         # Split testing and training data

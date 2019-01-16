@@ -11,6 +11,7 @@ import tensorflow as tf
 
 SUM_AM = 20
 DEBUG = False
+
 def debugPrint(tensor, msg):
     if DEBUG and SUM_AM != 0:
         f = Lambda(lambda x: tf.Print(tensor, [tensor], "\n{}: ".format(msg), summarize=SUM_AM))
