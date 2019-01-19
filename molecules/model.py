@@ -565,9 +565,9 @@ class TriTransformer:
 
         self.ppl = Lambda(K.exp)(loss)
         self.accu = Lambda(get_accu)([final_output, tgt_true])
-        # self.meanz = Lambda(tf.reduce_mean)(z_mean)
+
         # For encoding to z
-        self.output_latent = Model(src_seq_input, [z_sampled])
+        self.output_latent = Model(src_seq_input, z_sampled)
 
         if self.pp_loss_var is None:
             self.autoencoder = Model(src_seq_input, loss)
@@ -610,6 +610,7 @@ class TriTransformer:
         # session = K.get_session()
         # for layer in self.autoencoder.layers:
         #     if hasattr(layer, 'kernel_initializer'):
+        #         print("Running kernel initialiser for {}".format(layer.name))
         #         layer.kernel.initializer.run(session=session)
         # self.autoencoder.summary()
         # self.make_fast_decode_model()

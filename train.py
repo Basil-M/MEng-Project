@@ -20,15 +20,15 @@ k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
 NUM_EPOCHS = 40
-BATCH_SIZE = 32
+BATCH_SIZE = 20
 LATENT_DIM = 128
 RANDOM_SEED = 14029
-DATA = 'data/zinc_100k.txt'
+DATA = 'data/zinc_1k.txt'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
 # MODEL_NAME = 'attn'
-MODEL_NAME = 'testj5'
+MODEL_NAME = 'testj8'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -307,8 +307,8 @@ def main():
                         train = data_train
                         test = data_test
                     else:
-                        train = [data_train, props_train];
-                        test = [data_test, props_test];
+                        train = [data_train, props_train]
+                        test = [data_test, props_test]
                     print("Not using generator for data.")
                     model.autoencoder.fit(train, None, batch_size=args.batch_size,
                                           epochs=args.epochs, initial_epoch=current_epoch - 1,
