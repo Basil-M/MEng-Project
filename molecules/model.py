@@ -453,13 +453,10 @@ class TriTransformer:
         # enc_output = pr(enc_output)
         # z_pos = Lambda(self.get_pos_seq)(src_seq)
         if self.bottleneck == "interim_decoder":
-            z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
+            z_mean, z_logvar, _ = self.encoder_to_latent(src_seq, enc_output)
         else:
             z_mean, z_logvar = self.encoder_to_latent(enc_output)
 
-        pr = Lambda(lambda x: tf.Print(x, [x], "\nZ_MEAN: ", summarize=SUM_AM))
-        # z_mean = pr(z_mean)
-        pr = Lambda(lambda x: tf.Print(x, [x], "\nZ_LOGVAR: ", summarize=SUM_AM))
         # z_logvar = pr(z_logvar)
         print("Finished setting up decoder.")
 
