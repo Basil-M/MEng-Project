@@ -395,9 +395,6 @@ class TriTransformer:
                                             p.get("layers"), p.get("dropout"),
                                             word_emb=o_word_emb, pos_emb=pos_emb)
         self.target_layer = TimeDistributed(Dense(o_tokens.num(), use_bias=False))
-        self.printer = Lambda(self.print_shape)
-
-
 
         if self.stddev == 0 or self.stddev is None:
             self.kl_loss_var = None
@@ -416,11 +413,6 @@ class TriTransformer:
         pos = K.cumsum(K.ones_like(x, 'int32'), 1)
         return pos * mask
 
-    def print_shape(self, arg):
-        s = K.shape(arg)
-        s = K.print_tensor(s, "SHAPE OF {}: ".format(arg.name))
-        return K.reshape(arg, s)
-
     def compile_vae(self, optimizer='adam', active_layers=999):
         src_seq_input = Input(shape=(None,), dtype='int32', name='src_seq_input')
         tgt_seq_input = src_seq_input  # Input(shape=(None,), dtype='int32', name='tgt_seq_input')
@@ -436,10 +428,8 @@ class TriTransformer:
         tgt_true = Lambda(lambda x: x[:, 1:])(tgt_seq_input)
 
         src_pos = Lambda(self.get_pos_seq)(src_seq)
-
-        pr = Lambda(lambda x: tf.Print(x, [x], "\nSRC_POS: ", summarize=SUM_AM))
         src_pos = debugPrint(src_pos, "SRC_POS")
-        # src_pos = pr(src_pos)
+
         tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
         if not self.src_loc_info: src_pos = None
 
@@ -448,10 +438,8 @@ class TriTransformer:
                                             active_layers=active_layers,
                                             return_att=True)
 
-        pr = Lambda(lambda x: tf.Print(x, [x], "\nENC_OUTPUT: ", summarize=SUM_AM))
         enc_output = debugPrint(enc_output, "ENC_OUTPUT")
-        # enc_output = pr(enc_output)
-        # z_pos = Lambda(self.get_pos_seq)(src_seq)
+
         if self.bottleneck == "interim_decoder":
             z_mean, z_logvar, _ = self.encoder_to_latent(src_seq, enc_output)
         else:
@@ -468,7 +456,7 @@ class TriTransformer:
                                                          dec_input,
                                                          active_layers=active_layers,
                                                          return_att=True)
-        # pr = Lambda(lambda x: tf.Print(x, [x], "\nDECODER OUTPUT: ", summarize=SUM_AM))
+
         dec_output = debugPrint(dec_output, "DEC_OUTPUT")
 
         final_output = self.target_layer(dec_output)
@@ -482,34 +470,38 @@ class TriTransformer:
             latent_vec = Input(shape=[latent_dim], dtype='float', name='latent_rep')
 
         if self.pp_loss_var is not None:
+            # latent_vec = Lambda(lambda x: K.reshape(x, [-1, latent_dim]))(z_sampled)
             latent_vec = z_sampled
 
-        h = Dense(latent_dim, activation='linear')(latent_vec)
+        h = Dense(latent_dim, input_shape=(latent_dim,), activation='linear')(latent_vec)
         num_props = 4
         prop_input = Input(shape=[num_props])
         for _ in range(self.pp_layers - 1):
             h = Dense(latent_dim, activation='linear')(h)
         prop_output = Dense(num_props, activation='linear')(h)
 
+        # RECONSTRUCTION LOSS
         def rec_loss(args):
             y_pred, y_true = args
             y_true = tf.cast(y_true, 'int32')
             loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true, logits=y_pred)
             mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
             loss = tf.reduce_sum(loss * mask, -1) / tf.reduce_sum(mask, -1)
-            return K.sum(loss) ####XXXX??
+            return K.sum(loss)
 
+        # KL DIVERGENCE LOSS
         def kl_loss(args):
             z_mean_, z_log_var_ = args
 
-            return - 0.5 * self.kl_loss_var*tf.reduce_sum(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_),
-                                            name='KL_loss_sum')
+            return - 0.5 * self.kl_loss_var * tf.reduce_sum(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_),
+                                                            name='KL_loss_sum')
 
+        # PROPERTY PREDICTION LOSS
         def pp_loss(args):
             prop_input_, prop_output_ = args
             SE = K.pow(prop_input_ - prop_output_, 2)
             SE = tf.reduce_sum(SE)
-            return self.pp_loss_var *  K.sqrt(SE)
+            return self.pp_loss_var * K.sqrt(SE)
 
             # def get_loss(args):
             #     y_pred, y_true, z_mean_, z_log_var_ = args

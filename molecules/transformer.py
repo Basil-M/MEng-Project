@@ -380,10 +380,16 @@ class InterimDecoder():
 
         def sampling(args):
             z_mean_, z_logvar_ = args
-            batch_size = K.shape(z_mean_)[0]
-            k = K.shape(z_mean_)[1]
-            epsilon = K.random_normal(shape=(batch_size, k), mean=0., stddev=stddev)
-            return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [-1, k])
+            if stddev is None or stddev == 0:
+                # Multiply logvar by 0 so that gradient is not None
+                # TODO(Basil): Fix this hack
+                zero_logv = Multiply()([z_logvar_, K.zeros_like(z_logvar_)])
+                return Add()([z_mean_, zero_logv])
+            else:
+                batch_size = K.shape(z_mean_)[0]
+                k = K.shape(z_mean_)[1]
+                epsilon = K.random_normal(shape=(batch_size, k), mean=0., stddev=stddev)
+                return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [-1, k])
 
         self.sampler = Lambda(sampling, name='InterimDecoderSampler')
         self.expand = Lambda(lambda x: K.expand_dims(x, axis=2), name='DimExpander')
@@ -560,27 +566,21 @@ class LatentToEmbedded():
 
             def sampling(args):
                 z_mean_, z_logvar_ = args
-                if self.stddev == 0 or self.stddev is None:
-                    return z_mean_
-                else:
-                    batch_size = K.shape(z_mean_)[0]
-                    len_limit = K.shape(z_mean_)[1]
-                    epsilon = K.random_normal(shape=(batch_size, len_limit, d_model), mean=0., stddev=self.stddev)
-                    return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, len_limit, d_model])
+                batch_size = K.shape(z_mean_)[0]
+                len_limit = K.shape(z_mean_)[1]
+                epsilon = K.random_normal(shape=(batch_size, len_limit, d_model), mean=0., stddev=self.stddev)
+                return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, len_limit, d_model])
 
             self.expander_layer = None
         else:
             self.expander_layer = Dense(d_model, input_shape=(1,))
-            self.layers = [Dense(d_model, input_shape=(d_model,), activation=ACT) for _ in range(4)]
+            self.layers = [TimeDistributed(Dense(d_model, input_shape=(d_model,), activation=ACT)) for _ in range(NUM_LAYERS)]
 
             def sampling(args):
                 z_mean_, z_logvar_ = args
-                if self.stddev == 0 or self.stddev is None:
-                    return z_mean_
-                else:
-                    batch_size = K.shape(z_mean_)[0]
-                    epsilon = K.random_normal(shape=(batch_size, self.latent_dim), mean=0., stddev=self.stddev)
-                    return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, self.latent_dim])
+                batch_size = K.shape(z_mean_)[0]
+                epsilon = K.random_normal(shape=(batch_size, self.latent_dim), mean=0., stddev=self.stddev)
+                return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, self.latent_dim])
         self.stddev = stddev
         self.latent_dim = latent_dim
 
@@ -589,7 +589,11 @@ class LatentToEmbedded():
     def __call__(self, z_mean, z_logvar):
         # Sample from the means/variances decoded so far
         # Gives vector of size (batch_size, latent_dim)
-        sampled_z = self.sampler([z_mean, z_logvar])
+        if self.stddev is None or self.stddev == 0:
+            sampled_z = z_mean
+        else:
+            sampled_z = self.sampler([z_mean, z_logvar])
+
         sampled_z = debugPrint(sampled_z, "SAMPLED Z")
 
         # If there is a bottleneck, we need to expand back to model dimension
@@ -601,6 +605,7 @@ class LatentToEmbedded():
 
             for layer in self.layers:
                 expanded_z = layer(expanded_z)
+
         return sampled_z, expanded_z  # self.expander_layer(sampled_z)
 
 
