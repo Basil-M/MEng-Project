@@ -351,44 +351,32 @@ class Vec2Variational():
 
 method = "iter"
 
-
-class RNNDecoder():
+class InterimDecoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
                  layers=6, decoder_width=1, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=1):
+        self.latent_dim = latent_dim
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
 
-        self.decoder_width = decoder_width
+        self.width = decoder_width
         self.latent_embedder = Dense(d_model, input_shape=(1,), activation=ACT, name='latent_embedder')
-        self.latent_dim = latent_dim
 
-        # self.mean_layers = [TimeDistributed(Dense(d_model, input_shape=(decoder_width, d_model), activation=ACT)) for
-        #                     _ in range(NUM_LAYERS - 1)]
-        # self.mean_layer = TimeDistributed(
-        #     Dense(1, input_shape=(decoder_width, d_model), activation=ACT, name='mean_layer'))
-
-        # self.logvar_layers = [TimeDistributed(Dense(d_model, input_shape=(decoder_width, d_model), activation=ACT))
-        # for _ in range(NUM_LAYERS - 1)]
-        # self.logvar_layer = TimeDistributed(
-        #     Dense(1, input_shape=(decoder_width, d_model), activation=ACT, name='logvar_layer'))
-
-        self.conc_layer = Concatenate(axis=1, name='concat')
-
-        self.avg = Lambda(lambda x: tf.reduce_sum(x, axis=1))
-
-        self.attn = TimeDistributed(Dense(1, input_shape=(d_model,), activation='linear'))
+        # Calculates single attention values for each vector
         self.attn_dec = TimeDistributed(Dense(1, input_shape=(d_model,), activation='linear'))
-        self.mean_layers = [Dense(d_model, input_shape=(d_model,), activation=ACT) for
-                            _ in range(NUM_LAYERS - 1)]
+
+        # Preprocesses weighted-average decoder output
+        self.mean_layers = [Dense(d_model, input_shape=(d_model,), activation=ACT) for _ in range(NUM_LAYERS - 1)]
+        self.logvar_layers = [Dense(d_model, input_shape=(d_model,), activation=ACT) for _ in range(NUM_LAYERS - 1)]
+
+        # Calculate 'decoder_width' means/variances from output
         self.mean_layer = Dense(decoder_width, input_shape=(d_model,), activation=ACT, name='mean_layer')
-        self.logvar_layers = [Dense(d_model, input_shape=(d_model,), activation=ACT)
-                              for _ in range(NUM_LAYERS - 1)]
         self.logvar_layer = Dense(decoder_width, input_shape=(d_model,), activation=ACT, name='logvar_layer')
 
-        self.first_mean = Dense(decoder_width, input_shape=(d_model,))
-        self.first_var = Dense(decoder_width, input_shape=(d_model,))
-        self.mult = Multiply()
+        if method != "iter":
+            self.attn = TimeDistributed(Dense(1, input_shape=(d_model,), activation='linear'))
+            self.first_mean = Dense(decoder_width, input_shape=(d_model,))
+            self.first_var = Dense(decoder_width, input_shape=(d_model,))
 
         def sampling(args):
             z_mean_, z_logvar_ = args
@@ -397,27 +385,22 @@ class RNNDecoder():
             epsilon = K.random_normal(shape=(batch_size, k), mean=0., stddev=stddev)
             return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [-1, k])
 
-        def expand_dims(args):
-            return K.expand_dims(args, axis=2)
-
-        def collapse_dims(arg):
-            return K.reshape(arg, [K.shape(arg)[0], decoder_width])
-
         self.sampler = Lambda(sampling, name='InterimDecoderSampler')
-        self.expand = Lambda(expand_dims, name='DimExpander')
-        self.squeeze = Lambda(collapse_dims, name='DimCollapser')
+        self.expand = Lambda(lambda x: K.expand_dims(x, axis=2), name='DimExpander')
+        self.squeeze = Lambda(lambda x: K.reshape(x, [K.shape(x)[0], decoder_width]), name='DimCollapser')
 
         if method == "iter":
             self.ldim = K.constant(latent_dim + decoder_width, dtype='int32')
         else:
             self.ldim = K.constant(latent_dim, dtype='int32')
 
-    def print_shape(self, arg):
-        s = K.shape(arg)
-        s = K.print_tensor(s, "SHAPE OF {}: ".format(arg.name))
-        return K.reshape(arg, s)
-
     def __call__(self, src_seq, enc_output):
+        '''
+        Will iteratively compute means and variances
+        :param src_seq:
+        :param enc_output:
+        :return:
+        '''
         mean_init, var_init, z_init = self.first_iter(src_seq, enc_output)
 
         def the_loop(args):
@@ -430,8 +413,7 @@ class RNNDecoder():
                                                                         tf.TensorShape([None, None]),
                                                                         tf.TensorShape([None, None]),
                                                                         src_seq.get_shape(),
-                                                                        enc_output.get_shape()],
-                                                      parallel_iterations=32)
+                                                                        enc_output.get_shape()])
 
             # will generate too many latent dimensions, so clip it
             if method == "iter":
@@ -447,65 +429,81 @@ class RNNDecoder():
 
         return Lambda(the_loop)([mean_init, var_init, z_init])
 
+    def compute_next_z(self, src_seq, enc_output, z_so_far):
+        '''
+        Given latent values generated so far, will generate next decoder_width
+        latent means and variances
+        :param src_seq:     Embedded source sequence
+        :param enc_output:  Output of encoder
+        :param z_so_far:    Sampled latent variables generated so far
+        :return:
+        '''
+        # z is [batch_size, k]
+        # Embed to be of size [batch_size, k, d_model]
+        z = self.latent_embedder(self.expand(z_so_far))
+
+        # Positional embedding
+        z_pos = Lambda(self.get_pos_seq)(z_so_far)
+        z_pos = self.pos_layer(z_pos)
+        z = Add()([z, z_pos])
+
+        # Mask the output
+        self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(z_so_far)
+        self_sub_mask = Lambda(GetSubMask)(z_so_far)
+        self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
+        enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([z_so_far, src_seq])
+
+        # if return_att: self_atts, enc_atts = [], []
+
+        # Run through interim decoder
+        for dec_layer in self.layers:
+            z, self_att, enc_att = dec_layer(z, enc_output, self_mask, enc_mask)
+            # if return_att:
+            #     self_atts.append(self_att)
+            #     enc_atts.append(enc_att)
+
+        # Decoder output is also [batch_size, k, d_model]
+        # Use weighted average mechanism to produce [batch_size, d_model]
+        a_vals = self.attn_dec(z)
+        a_vals = Softmax(axis=1)(a_vals)
+        z = Dot(axes=1)([a_vals, z])
+        z = Lambda(lambda x: K.squeeze(x, axis=1))(z)
+
+        z_mean = z
+        for layer in self.mean_layers:
+            z_mean = layer(z_mean)
+        # Output 'width' means
+        output_mean = self.mean_layer(z_mean)
+        output_mean = self.squeeze(output_mean)
+
+        z_logvar = z
+        for layer in self.logvar_layers:
+            z_logvar = layer(z_logvar)
+
+        # Output 'width' logvars
+        output_logvar = self.logvar_layer(z_logvar)
+        output_logvar = self.squeeze(output_logvar)
+
+        # Sample the new means/variances
+        output_z = self.sampler([output_mean, output_logvar])
+
+        return output_mean, output_logvar, output_z
+
     def first_iter(self, src_seq, enc_output, return_att=False, active_layers=999):
         print("Setting up first decoder iteration")
 
         def gen_zeros(sample_vec):
             batch_size = K.shape(sample_vec)[0]
-            return tf.keras.backend.random_normal([batch_size, self.decoder_width], mean=0.0, stddev=0.01,
+            return tf.keras.backend.random_normal([batch_size, self.width], mean=0.0, stddev=0.01,
                                                   dtype='float')
             # return tf.keras.backend.zeros([batch_size, self.decoder_width], dtype='float', name='zeros')
 
         # initialise
         z_zero = Lambda(gen_zeros, name='z_zero')(enc_output)
-        z_zero = debugPrint(z_zero, "INITIAL ITER -  Starting with")
+        output_mean, output_logvar, output_z = self.compute_next_z(src_seq, enc_output, z_zero)
 
-        # expand so each value is a vector of size d_model
-        z = self.latent_embedder(self.expand(z_zero))  # (batch_size, width, d_model)
-        z = debugPrint(z, "Latent embedding from this:")
-
-        # Add positional encoding
-        z_pos = Lambda(self.get_pos_seq)(z_zero)
-        z_pos = self.pos_layer(z_pos)
-
-        z = Add()([z, z_pos])
-
-        # Mask the output
-        self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(z_zero)
-        self_sub_mask = Lambda(GetSubMask)(z_zero)
-        self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
-        enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([z_zero, src_seq])
-
-        if return_att: self_atts, enc_atts = [], []
-
-        for dec_layer in self.layers[:active_layers]:
-            z, self_att, enc_att = dec_layer(z, enc_output, self_mask, enc_mask)
-            if return_att:
-                self_atts.append(self_att)
-                enc_atts.append(enc_att)
-
-        # z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.latent_dim]))(z)
-        # z should be [batch_size, width, d_model]
-        a_vals = self.attn_dec(z)
-        a_vals = Softmax(axis=1)(a_vals)
-        z = Dot(axes=1)([a_vals, z])
-        z = Lambda(lambda x: K.squeeze(x, axis=1))(z)
-        # where k is number of means/variances it's generated so far
-        # predict the next means/variances based off the previous (width) means/variances
-        z_logvar = z
-        z_mean = z
-        for layer in self.mean_layers:
-            z_mean = layer(z_mean)
-
-        for layer in self.logvar_layers:
-            z_logvar = layer(z_logvar)
-
-        output_mean = self.mean_layer(z_mean)
-        output_mean = self.squeeze(output_mean)
-
-        output_logvar = self.logvar_layer(z_logvar)
-        output_logvar = self.squeeze(output_logvar)
-
+        # This method calculates the first 'width' elements of the latent space
+        # using the weighted average approach
         if method != "iter":
             a_vals = self.attn(enc_output)
             a_vals = Softmax(axis=1)(a_vals)
@@ -513,84 +511,39 @@ class RNNDecoder():
             h = Lambda(lambda x: K.squeeze(x, axis=1))(h)
             # h = self.squeeze(h)     # h is [batch_size, d_model]
 
-            # multiply output mean/var by 0
+            # Multiply output mean/var by 0
+            # compute_next_z must be run at least once
+            # else the variables in the layers won't be initialised
             output_mean = Multiply()([output_mean, Lambda(K.zeros_like)(output_mean)])
             output_logvar = Multiply()([output_mean, Lambda(K.zeros_like)(output_logvar)])
             output_mean = Add()([output_mean, self.first_mean(h)])
             output_logvar = Add()([output_logvar, self.first_var(h)])
 
-        sampled_output = self.sampler([output_mean, output_logvar])
-        return (output_mean, output_logvar, sampled_output, self_atts, enc_atts) if return_att else (
-        output_mean, output_logvar, sampled_output)
+            # Sample the new means/variances
+            output_z = self.sampler([output_mean, output_logvar])
+
+        return (output_mean, output_logvar, output_z)
+        # return (output_mean, output_logvar, sampled_output, self_atts, enc_atts) if return_att else (
+        # output_mean, output_logvar, sampled_output)
 
     def cond(self, mean_so_far, logvar_so_far, z_so_far, src_seq, enc_output):
         # Return true while mean length is less than latent dim
         return tf.less(K.shape(mean_so_far)[1], self.ldim)
 
     def step(self, mean_so_far, logvar_so_far, z_so_far, src_seq, enc_output):
-
         mean_so_far = debugPrint(mean_so_far, "DECODER ITERATION, MEAN SO FAR:")
 
         # z_so_far = self.sampler([mean_so_far, logvar_so_far])
         z_so_far = debugPrint(z_so_far, "\tSampled value:")
 
-        # Should be vector of size [batch_size, latent_dim]
-        # z_so_far = self.pad_zeros(z_so_far)
+        mean_k, logvar_k, z_k = self.compute_next_z(src_seq, enc_output, z_so_far)
 
-        # Expand to matrix of size [batch_size, latent_dim, model_dim]
-        z = self.latent_embedder(self.expand(z_so_far))
+        # Concatenate with previously generated latent dims
+        conc = Concatenate(axis=1, name='concat')
+        mean_so_far = conc([mean_so_far, mean_k])
+        logvar_so_far = conc([logvar_so_far, logvar_k])
+        z_so_far = conc([z_so_far, z_k])
 
-        z = debugPrint(z, "\tEmbedded value:")
-
-        # Add positional encoding
-        z_pos = Lambda(self.get_pos_seq)(z_so_far)
-        z_pos = self.pos_layer(z_pos)
-
-        z = Add()([z, z_pos])
-        # Mask the output
-        self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(z_so_far)
-        self_sub_mask = Lambda(GetSubMask)(z_so_far)
-        self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
-        enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([z_so_far, src_seq])
-
-        for dec_layer in self.layers:
-            # z = pr2(z)
-            z, _, _ = dec_layer(z, enc_output, self_mask, enc_mask)
-
-        # z should be [batch_size, k, d_model]
-        # where k is number of means/variances it's generated so far
-        # predict the next means/variances based off the previous (width) means/variances
-
-        # z = self.printer(z)
-        # z = z[:, -self.decoder_width:, :]
-
-        a_vals = self.attn_dec(z)
-        a_vals = Softmax(axis=1)(a_vals)
-        z = Dot(axes=1)([a_vals, z])
-        z = Lambda(lambda x: K.squeeze(x, axis=1))(z)
-
-        z = debugPrint(z, "\tCalculating next means from: ")
-
-        # z = self.printer(z)
-        # z = Lambda(lambda x: K.reshape(x, [-1, self.d_model * self.decoder_width]))(z)
-        z_logvar = z
-        z_mean = z
-        for layer in self.mean_layers:
-            z_mean = layer(z_mean)
-
-        for layer in self.logvar_layers:
-            z_logvar = layer(z_logvar)
-
-        logvar_k = self.squeeze(self.logvar_layer(z_logvar))
-        mean_k = self.squeeze(self.mean_layer(z_mean))
-
-        mean_k = debugPrint(mean_k, "\tGenerated mean: ")
-        z_k = self.sampler([mean_k, logvar_k])
-
-        mean_so_far = self.conc_layer([mean_so_far, mean_k])
-        logvar_so_far = self.conc_layer([logvar_so_far, logvar_k])
-        z_so_far = self.conc_layer([z_so_far, z_k])
-        # mean_so_far = self.pr(mean_so_far)
         return [mean_so_far, logvar_so_far, z_so_far, src_seq, enc_output]
 
     def get_pos_seq(self, x):

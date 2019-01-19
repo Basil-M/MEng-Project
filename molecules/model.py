@@ -377,12 +377,12 @@ class TriTransformer:
             self.encoder_to_latent = tr.AvgLatent(p.get("d_model"), p.get("latent_dim"))
         elif p.get("bottleneck") == "interim_decoder":
             latent_pos_emb = tr.Embedding(p.get("latent_dim"), p.get("ID_d_model"), trainable=True)
-            self.encoder_to_latent = tr.RNNDecoder(p.get("ID_d_model"), p.get("ID_d_inner_hid"),
-                                                   p.get("ID_heads"), p.get("ID_d_k"), p.get("ID_d_v"),
-                                                   p.get("ID_layers"), p.get("ID_width"), p.get("dropout"),
-                                                   stddev=p.get("stddev"),
-                                                   latent_dim=p.get("latent_dim"),
-                                                   pos_emb=latent_pos_emb)
+            self.encoder_to_latent = tr.InterimDecoder(p.get("ID_d_model"), p.get("ID_d_inner_hid"),
+                                                       p.get("ID_heads"), p.get("ID_d_k"), p.get("ID_d_v"),
+                                                       p.get("ID_layers"), p.get("ID_width"), p.get("dropout"),
+                                                       stddev=p.get("stddev"),
+                                                       latent_dim=p.get("latent_dim"),
+                                                       pos_emb=latent_pos_emb)
         elif p.get("bottleneck") == "none":
             self.encoder_to_latent = tr.Vec2Variational(p.get("d_model"), self.len_limit)
 

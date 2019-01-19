@@ -130,7 +130,7 @@ class AttnParams:
 
     def equals(self, other_params):
         for key in self._params:
-            if other_params._params[key] != self._params[key] and not key in self._training_params:
+            if other_params.get(key) != self._params[key] and key not in self._training_params:
                 return False
         return True
 
@@ -145,9 +145,6 @@ class TokenList:
         self.t2id = {v: k for k, v in enumerate(self.id2t)}
 
     def id(self, x):
-        if x not in self.t2id:
-            print("MISSING TOKEN???")
-            print("REQUESTED ID FOR TOKEN {}".format(x))
         return self.t2id.get(x, 1)
 
     def token(self, x):
