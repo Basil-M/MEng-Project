@@ -4,6 +4,7 @@ import numpy as np
 from keras.callbacks import Callback
 from keras import backend as K
 
+
 def FreqDict2List(dt):
     return sorted(dt.items(), key=lambda d: d[-1], reverse=True)
 
@@ -27,6 +28,7 @@ class epoch_track(Callback):
     Callback which tracks the current epoch
     And updates the pickled Params file in the model directory
     '''
+
     def __init__(self, params, param_filename):
         self._params = params
         self._filename = param_filename
@@ -56,22 +58,31 @@ class WeightAnnealer_epoch(Callback):
         Currently just adjust kl weight, will keep xent weight constant
     '''
 
-    def __init__(self, weight, start_val = 0.1, b = 1.5, max_val = 1.0, init_epochs = 1):
-        self.weight_var = weight
-        self.w0 = start_val
+    def __init__(self, var, anneal_epochs=10, max_val=1.0, init_epochs=1):
+        self.weight_var = var
         self.max_weight = max_val
-        self.inc = b
         self.init_epochs = init_epochs
-        print("Initialising weight loss annealer with w0 = {} and increment of {} each epoch".format(start_val, b))
-        print("\tExpected to reach max_val of {} in {} epochs".format(max_val, int(self.init_epochs + np.ceil(np.log(max_val/start_val)/np.log(1.5)))))
-        print("\tFirst training {} epochs without variational term".format(self.init_epochs))
+        self.epochs_to_max = anneal_epochs
+        print(
+            "Annealing KL weight to a max value of {};\n\tFirst training {} epochs without KL loss\n\tThen annealing using tanh schedule over {} epochs".format(
+                max_val, init_epochs, anneal_epochs))
+        # print("Initialising weight loss annealer with w0 = {} and increment of {} each epoch".format(start_val, b))
+        # print("\tExpected to reach max_val of {} in {} epochs".format(max_val, int(
+        #     self.init_epochs + np.ceil(np.log(max_val / start_val) / np.log(1.5)))))
+        # print("\tFirst training {} epochs without variational term".format(self.init_epochs))
 
     def on_epoch_begin(self, epoch, logs=None):
-        weight = min(self.max_weight, self.w0*(self.inc ** (epoch - self.init_epochs)))
-        if epoch < self.init_epochs:
-            weight = 0
 
-        print(epoch)
+        # weight = min(self.max_weight, self.w0 * (self.inc ** (epoch - self.init_epochs)))
+
+        epoch = epoch - self.init_epochs
+        if epoch < 0:
+            weight = 0
+        elif epoch >= self.epochs_to_max:
+            weight = self.max_weight
+        else:
+            weight = 0.5 * self.max_weight * (1 + np.tanh(-2.5 + 5 * epoch / self.epochs_to_max))
+
         print("Current KL loss annealer weight is {}".format(weight))
         K.set_value(self.weight_var, weight)
 
@@ -107,7 +118,7 @@ def one_hot_index(vec, charset):
 
 def from_one_hot_array(vec):
     oh = np.where(vec == 1)
-    if oh[0].shape == (0, ):
+    if oh[0].shape == (0,):
         return None
     return int(oh[0][0])
 
@@ -116,20 +127,19 @@ def decode_smiles_from_indexes(vec, charset):
     return "".join(map(lambda x: charset[x], vec)).strip()
 
 
-def load_dataset(filename, split = True):
+def load_dataset(filename, split=True):
     h5f = h5py.File(filename, 'r')
     if split:
         data_train = h5f['data_train'][:]
     else:
         data_train = None
     data_test = h5f['data_test'][:]
-    charset =  h5f['charset'][:]
+    charset = h5f['charset'][:]
     h5f.close()
     if split:
         return (data_train, data_test, charset)
     else:
         return (data_test, charset)
-
 
 
 # SA SCORE
@@ -165,88 +175,87 @@ _fscores = None
 
 
 def readFragmentScores(name='fpscores'):
-  import gzip
-  global _fscores
-  # generate the full path filename:
-  if name == "fpscores":
-    name = op.join(op.dirname(__file__), name)
-  _fscores = cPickle.load(gzip.open('%s.pkl.gz' % name))
-  outDict = {}
-  for i in _fscores:
-    for j in range(1, len(i)):
-      outDict[i[j]] = float(i[0])
-  _fscores = outDict
+    import gzip
+    global _fscores
+    # generate the full path filename:
+    if name == "fpscores":
+        name = op.join(op.dirname(__file__), name)
+    _fscores = cPickle.load(gzip.open('%s.pkl.gz' % name))
+    outDict = {}
+    for i in _fscores:
+        for j in range(1, len(i)):
+            outDict[i[j]] = float(i[0])
+    _fscores = outDict
 
 
 def numBridgeheadsAndSpiro(mol, ri=None):
-  nSpiro = rdMolDescriptors.CalcNumSpiroAtoms(mol)
-  nBridgehead = rdMolDescriptors.CalcNumBridgeheadAtoms(mol)
-  return nBridgehead, nSpiro
+    nSpiro = rdMolDescriptors.CalcNumSpiroAtoms(mol)
+    nBridgehead = rdMolDescriptors.CalcNumBridgeheadAtoms(mol)
+    return nBridgehead, nSpiro
 
 
 def calculateScore(m):
-  if _fscores is None:
-    readFragmentScores()
+    if _fscores is None:
+        readFragmentScores()
 
-  # fragment score
-  fp = rdMolDescriptors.GetMorganFingerprint(m,
-                                             2)  #<- 2 is the *radius* of the circular fingerprint
-  fps = fp.GetNonzeroElements()
-  score1 = 0.
-  nf = 0
-  for bitId, v in iteritems(fps):
-    nf += v
-    sfp = bitId
-    score1 += _fscores.get(sfp, -4) * v
-  score1 /= nf
+    # fragment score
+    fp = rdMolDescriptors.GetMorganFingerprint(m,
+                                               2)  # <- 2 is the *radius* of the circular fingerprint
+    fps = fp.GetNonzeroElements()
+    score1 = 0.
+    nf = 0
+    for bitId, v in iteritems(fps):
+        nf += v
+        sfp = bitId
+        score1 += _fscores.get(sfp, -4) * v
+    score1 /= nf
 
-  # features score
-  nAtoms = m.GetNumAtoms()
-  nChiralCenters = len(Chem.FindMolChiralCenters(m, includeUnassigned=True))
-  ri = m.GetRingInfo()
-  nBridgeheads, nSpiro = numBridgeheadsAndSpiro(m, ri)
-  nMacrocycles = 0
-  for x in ri.AtomRings():
-    if len(x) > 8:
-      nMacrocycles += 1
+    # features score
+    nAtoms = m.GetNumAtoms()
+    nChiralCenters = len(Chem.FindMolChiralCenters(m, includeUnassigned=True))
+    ri = m.GetRingInfo()
+    nBridgeheads, nSpiro = numBridgeheadsAndSpiro(m, ri)
+    nMacrocycles = 0
+    for x in ri.AtomRings():
+        if len(x) > 8:
+            nMacrocycles += 1
 
-  sizePenalty = nAtoms**1.005 - nAtoms
-  stereoPenalty = math.log10(nChiralCenters + 1)
-  spiroPenalty = math.log10(nSpiro + 1)
-  bridgePenalty = math.log10(nBridgeheads + 1)
-  macrocyclePenalty = 0.
-  # ---------------------------------------
-  # This differs from the paper, which defines:
-  #  macrocyclePenalty = math.log10(nMacrocycles+1)
-  # This form generates better results when 2 or more macrocycles are present
-  if nMacrocycles > 0:
-    macrocyclePenalty = math.log10(2)
+    sizePenalty = nAtoms ** 1.005 - nAtoms
+    stereoPenalty = math.log10(nChiralCenters + 1)
+    spiroPenalty = math.log10(nSpiro + 1)
+    bridgePenalty = math.log10(nBridgeheads + 1)
+    macrocyclePenalty = 0.
+    # ---------------------------------------
+    # This differs from the paper, which defines:
+    #  macrocyclePenalty = math.log10(nMacrocycles+1)
+    # This form generates better results when 2 or more macrocycles are present
+    if nMacrocycles > 0:
+        macrocyclePenalty = math.log10(2)
 
-  score2 = 0. - sizePenalty - stereoPenalty - spiroPenalty - bridgePenalty - macrocyclePenalty
+    score2 = 0. - sizePenalty - stereoPenalty - spiroPenalty - bridgePenalty - macrocyclePenalty
 
-  # correction for the fingerprint density
-  # not in the original publication, added in version 1.1
-  # to make highly symmetrical molecules easier to synthetise
-  score3 = 0.
-  if nAtoms > len(fps):
-    score3 = math.log(float(nAtoms) / len(fps)) * .5
+    # correction for the fingerprint density
+    # not in the original publication, added in version 1.1
+    # to make highly symmetrical molecules easier to synthetise
+    score3 = 0.
+    if nAtoms > len(fps):
+        score3 = math.log(float(nAtoms) / len(fps)) * .5
 
-  sascore = score1 + score2 + score3
+    sascore = score1 + score2 + score3
 
-  # need to transform "raw" value into scale between 1 and 10
-  min = -4.0
-  max = 2.5
-  sascore = 11. - (sascore - min + 1) / (max - min) * 9.
-  # smooth the 10-end
-  if sascore > 8.:
-    sascore = 8. + math.log(sascore + 1. - 9.)
-  if sascore > 10.:
-    sascore = 10.0
-  elif sascore < 1.:
-    sascore = 1.0
+    # need to transform "raw" value into scale between 1 and 10
+    min = -4.0
+    max = 2.5
+    sascore = 11. - (sascore - min + 1) / (max - min) * 9.
+    # smooth the 10-end
+    if sascore > 8.:
+        sascore = 8. + math.log(sascore + 1. - 9.)
+    if sascore > 10.:
+        sascore = 10.0
+    elif sascore < 1.:
+        sascore = 1.0
 
-  return sascore
-
+    return sascore
 
 #
 #  Copyright (c) 2013, Novartis Institutes for BioMedical Research Inc.

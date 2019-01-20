@@ -20,7 +20,7 @@ k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
 NUM_EPOCHS = 40
-BATCH_SIZE = 20
+BATCH_SIZE = 50
 LATENT_DIM = 128
 RANDOM_SEED = 14029
 DATA = 'data/zinc_1k.txt'
@@ -28,7 +28,7 @@ DATA = 'data/zinc_1k.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
 # MODEL_NAME = 'attn'
-MODEL_NAME = 'testj19'
+MODEL_NAME = 'testj23'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -68,10 +68,12 @@ def get_arguments():
     parser.add_argument('--base_lr', type=float, metavar='0.001', default=0.001,
                         help='Base training rate for ADAM optimizer')
 
-    parser.add_argument('--kl_weight_init', type=float, metavar='0.1', default=default.get("kl_weight_init"),
-                        help='Initial weighting used for KL loss')
-    parser.add_argument('--kl_weight_inc', type=float, metavar='1.5', default=default.get("kl_weight_inc"),
-                        help='Amount to increment KL loss weighting by each epoch')
+    parser.add_argument('--kl_pretrain_epochs', type=float, metavar='1', default=default.get("kl_pretrain_epochs"),
+                        help='Number of epochs to train before introducing KL loss')
+    parser.add_argument('--kl_anneal_epochs', type=float, metavar='5', default=default.get("kl_anneal_epochs"),
+                        help='Number of epochs to anneal over')
+    parser.add_argument('--kl_max_weight', type=float, metavar='1', default=default.get("kl_max_weight"),
+                        help='Maximum KL weight')
 
     parser.add_argument('--pp_weight', type=float, metavar='1.5', default=default.get("pp_weight"),
                         help='For joint optimisation: Amount to weight MSE loss of property predictor')
@@ -154,7 +156,7 @@ def main():
         reduce_lr = ReduceLROnPlateau(monitor='val_loss',
                                       factor=0.2,
                                       patience=3,
-                                      min_lr=args.base_lr/10)
+                                      min_lr=args.base_lr / 10)
 
         model.autoencoder.fit(
             data_train,
@@ -250,23 +252,24 @@ def main():
         # Learning rate scheduler
         callbacks = []
         callbacks.append(LRSchedulerPerStep(params.get("d_model"),
-                                          int(4/args.base_lr)))  # there is a warning that it is slow, however, it's ok.
+                                            int(
+                                                4 / args.base_lr)))  # there is a warning that it is slow, however, it's ok.
 
         # Model saver
         callbacks.append(ModelCheckpoint(MODEL_DIR + "model.h5", save_best_only=False,
-                                      save_weights_only=True))
+                                         save_weights_only=True))
 
         # Best model saver
         callbacks.append(ModelCheckpoint(MODEL_DIR + "best_model.h5", save_best_only=True,
-                                           save_weights_only=True))
+                                         save_weights_only=True))
 
         # Tensorboard Callback
         callbacks.append(TensorBoard(log_dir=MODEL_DIR + "logdir/",
-                                 histogram_freq=0,
-                                 batch_size=args.batch_size,
-                                 write_graph=True,
-                                 write_images=True,
-                                 update_freq='batch'))
+                                     histogram_freq=0,
+                                     batch_size=args.batch_size,
+                                     write_graph=True,
+                                     write_images=True,
+                                     update_freq='batch'))
 
         if args.bottleneck == "none":
             model.compile_vae(Adam(args.base_lr, 0.9, 0.98))
@@ -285,7 +288,10 @@ def main():
         current_epoch = params.get("current_epoch")
         # Weight annealer callback
         if params.get("stddev") != 0 and params.get("stddev") is not None:
-            callbacks.append(WeightAnnealer_epoch(model.kl_loss_var, start_val = params.get("kl_weight_init"), b = params.get("kl_weight_inc")))
+            callbacks.append(WeightAnnealer_epoch(model.kl_loss_var,
+                                                  anneal_epochs=params.get("kl_anneal_epochs"),
+                                                  max_val=params.get("kl_max_weight"),
+                                                  init_epochs=params.get("kl_pretrain_epochs")))
 
         # Train model
         try:

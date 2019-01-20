@@ -61,9 +61,10 @@ class AttnParams:
             "d_file": None,
             "current_epoch": 1,
             "epochs": 50,
-            "kl_weight_init": 0.05,
-            "kl_weight_inc": 1.5,
-            "pp_weight": 1,
+            "kl_pretrain_epochs": 2,
+            "kl_anneal_epochs": 5,
+            "kl_max_weight": 1,
+            "pp_weight": 0,
             "ae_trained": False,
             "batch_size": 64,
             "len_limit": 120,
@@ -81,12 +82,12 @@ class AttnParams:
             "ID_d_k": None,
             "ID_d_v": None,
             "ID_layers": None,
-            "ID_width": 1,
+            "ID_width": 4,
             "stddev": 1,
             "pp_epochs": 15,
             "pp_layers": 3,
             "model_arch": "TRANSFORMER",
-            "bottleneck": "interim_decoder"
+            "bottleneck": "average"
         }
 
     def get(self, param):
@@ -198,7 +199,7 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
 
         Xs = []
         Ps = []
-
+        Ps_norms = []
         # Get structures
         for seq in data:
             mol = Chem.MolFromSmiles(seq)
@@ -206,6 +207,14 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
             Ps.append([QED(mol), LogP(mol), MolWt(mol), SAS(mol)])
 
             Xs.append(seq)
+
+        # Normalise properties
+        Ps = np.array(Ps)
+        for k in range(np.shape(Ps)[1]):
+            mu = np.mean(Ps[:,k])
+            std = np.std(Ps[:,k])
+            Ps[:,k] = (Ps[:,k] - mu)/std
+            Ps_norms.append([mu, std])
 
         # Split testing and training data
         # TODO(Basil): Fix ugly hack with the length of Xs...
@@ -222,6 +231,7 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
                 dfile.create_dataset('train', data=train_data)
                 dfile.create_dataset('test_props', data=test_pps)
                 dfile.create_dataset('train_props', data=train_pps)
+                dfile.create_dataset('property_norms', data = Ps_norms)
 
     return train_data, test_data, train_pps, test_pps
 

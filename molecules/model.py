@@ -128,7 +128,7 @@ class Transformer:
         pos_emb = tr.Embedding(self.len_limit, d_emb, trainable=False,
                                weights=[tr.GetPosEncodingMatrix(self.len_limit, d_emb)])
 
-        i_word_emb = tr.Embedding(i_tokens.num(), d_emb)
+        i_word_emb = tr.Embedding(i_tokens.num(), d_emb, trainable=True)
         o_word_emb = i_word_emb
 
         self.encoder = tr.Encoder(self.d_model, p.get("d_inner_hid"), p.get("heads"), p.get("d_k"), p.get("d_v"),
@@ -399,7 +399,7 @@ class TriTransformer:
         if self.stddev == 0 or self.stddev is None:
             self.kl_loss_var = None
         else:
-            self.kl_loss_var = K.variable(p.get("kl_weight_init"), dtype=np.float, name='kl_loss_weight')
+            self.kl_loss_var = K.variable(0.0, dtype=np.float, name='kl_loss_weight')
 
         if p.get("pp_weight") == 0 or p.get("pp_weight") is None:
             self.pp_loss_var = None
