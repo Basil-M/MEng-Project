@@ -5,7 +5,7 @@ import numpy as np
 from keras import backend as K
 from keras import objectives
 from keras.models import Model
-from keras.layers import Input, Dense, Lambda
+from keras.layers import Input, Dense, Lambda, Softmax
 from keras.layers.core import Dense, Activation, Flatten, RepeatVector
 from keras.layers.wrappers import TimeDistributed
 from keras.layers.recurrent import GRU
@@ -353,6 +353,7 @@ class TriTransformer:
         self.decode_model = None
         self.bottleneck = p.get("bottleneck")
         self.stddev = p.get("stddev")
+
         if self.bottleneck == "none":
             p.set("latent_dim", None)
             self.latent_dim = None
@@ -373,28 +374,44 @@ class TriTransformer:
                                              p.get("d_v"),
                                              p.get("layers"), p.get("dropout"), word_emb=i_word_emb, pos_emb=pos_emb)
 
+        self.false_embedder = tr.FalseEmbeddings(d_emb=self.d_model)
+
         if p.get("bottleneck") == "average":
             self.encoder_to_latent = tr.AvgLatent(p.get("d_model"), p.get("latent_dim"))
         elif p.get("bottleneck") == "interim_decoder":
-            latent_pos_emb = tr.Embedding(p.get("latent_dim"), p.get("ID_d_model"), trainable=True)
+            latent_pos_emb = tr.Embedding(p.get("latent_dim"), p.get("ID_d_model"), trainable=False)
             self.encoder_to_latent = tr.InterimDecoder(p.get("ID_d_model"), p.get("ID_d_inner_hid"),
                                                        p.get("ID_heads"), p.get("ID_d_k"), p.get("ID_d_v"),
                                                        p.get("ID_layers"), p.get("ID_width"), p.get("dropout"),
                                                        stddev=p.get("stddev"),
                                                        latent_dim=p.get("latent_dim"),
-                                                       pos_emb=latent_pos_emb)
+                                                       pos_emb=latent_pos_emb,
+                                                       false_emb=self.false_embedder)
+
         elif p.get("bottleneck") == "none":
             self.encoder_to_latent = tr.Vec2Variational(p.get("d_model"), self.len_limit)
 
-        self.latent_to_decoder = tr.LatentToEmbedded(self.d_model,
-                                                     latent_dim=self.latent_dim,
-                                                     stddev=p.get("stddev"))
+        # Sample from latent space
+        def sampling(args):
+            z_mean_, z_logvar_ = args
+            if self.stddev is None or self.stddev == 0:
+                return z_mean_
+            else:
+                if p.get("bottleneck") == "none":
+                    latent_shape = (K.shape(z_mean_)[0], K.shape(z_mean_)[1], p.get("d_model"))
+                else:
+                    latent_shape = (K.shape(z_mean_)[0], p.get("latent_dim"))
 
+                epsilon = K.random_normal(shape=latent_shape, mean=0., stddev=self.stddev)
+                return z_mean_ + K.exp(z_logvar_ / 2) * epsilon
+
+        self.sampler = Lambda(sampling)
         self.decoder = tr.DecoderFromLatent(self.d_model, p.get("d_inner_hid"), p.get("heads"), p.get("d_k"),
                                             p.get("d_v"),
                                             p.get("layers"), p.get("dropout"),
                                             word_emb=o_word_emb, pos_emb=pos_emb)
         self.target_layer = TimeDistributed(Dense(o_tokens.num(), use_bias=False))
+        self.target_softmax = Softmax()
 
         if self.stddev == 0 or self.stddev is None:
             self.kl_loss_var = None
@@ -445,10 +462,13 @@ class TriTransformer:
         else:
             z_mean, z_logvar = self.encoder_to_latent(enc_output)
 
-        # z_logvar = pr(z_logvar)
-        print("Finished setting up decoder.")
+        # sample from z_mean, z_logvar
+        z_sampled = self.sampler([z_mean, z_logvar])
 
-        z_sampled, dec_input = self.latent_to_decoder(z_mean, z_logvar)
+        # 'false embed' for decoder
+        dec_input = self.false_embedder(z_sampled)
+
+        dec_input = debugPrint(dec_input, "DEC_INPUT (Embedded sampled z)")
 
         dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq,
                                                          tgt_pos,
@@ -457,9 +477,11 @@ class TriTransformer:
                                                          active_layers=active_layers,
                                                          return_att=True)
 
-        dec_output = debugPrint(dec_output, "DEC_OUTPUT")
 
+        dec_output = debugPrint(dec_output, "DEC_OUTPUT")
         final_output = self.target_layer(dec_output)
+        final_output = Softmax()(final_output)
+        final_output = debugPrint(final_output, "FINAL_OUTPUT")
 
         # Property prediction
         if self.latent_dim is None:
@@ -487,13 +509,13 @@ class TriTransformer:
             loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true, logits=y_pred)
             mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
             loss = tf.reduce_sum(loss * mask, -1) / tf.reduce_sum(mask, -1)
-            return K.sum(loss)
+            return K.mean(loss)
 
         # KL DIVERGENCE LOSS
         def kl_loss(args):
             z_mean_, z_log_var_ = args
 
-            return - 0.5 * self.kl_loss_var * tf.reduce_sum(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_),
+            return - 0.5 * self.kl_loss_var * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_),
                                                             name='KL_loss_sum')
 
         # PROPERTY PREDICTION LOSS
@@ -501,7 +523,7 @@ class TriTransformer:
             prop_input_, prop_output_ = args
             SE = K.pow(prop_input_ - prop_output_, 2)
             SE = tf.reduce_sum(SE)
-            return self.pp_loss_var * K.sqrt(SE)
+            return self.pp_loss_var * K.sqrt(SE)/K.shape(prop_output)[0]
 
             # def get_loss(args):
             #     y_pred, y_true, z_mean_, z_log_var_ = args

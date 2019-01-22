@@ -9,7 +9,7 @@ import tensorflow as tf
 # except:
 #     pass
 
-SUM_AM = 20
+SUM_AM = 200
 DEBUG = False
 
 
@@ -282,7 +282,6 @@ class VariationalEncoder():
         if return_att: atts = []
         mask = Lambda(lambda x: GetPadMask(x, x))(src_seq)
 
-        pr2 = Lambda(lambda x: tf.Print(x, [x], "\nENCODER MASK: ", summarize=100))
         # mask = pr2(mask)
         for enc_layer in self.layers[:active_layers]:
             h, att = enc_layer(h, mask)
@@ -351,16 +350,23 @@ class Vec2Variational():
 
 method = "iter"
 
+
 class InterimDecoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
-                 layers=6, decoder_width=1, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=1):
+                 layers=6, decoder_width=1, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=1,
+                 false_emb=None):
         self.latent_dim = latent_dim
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
 
         self.width = decoder_width
-        self.latent_embedder = Dense(d_model, input_shape=(1,), activation=ACT, name='latent_embedder')
+
+        # False embedder to go from latent dim to what decoder expects
+        if false_emb is None:
+            self.false_embedder = TimeDistributed(Dense(d_model, input_shape=(1,), activation=ACT, name='latent_embedder'))
+        else:
+            self.false_embedder = false_emb
 
         # Calculates single attention values for each vector
         self.attn_dec = TimeDistributed(Dense(1, input_shape=(d_model,), activation='linear'))
@@ -446,7 +452,7 @@ class InterimDecoder():
         '''
         # z is [batch_size, k]
         # Embed to be of size [batch_size, k, d_model]
-        z = self.latent_embedder(self.expand(z_so_far))
+        z = self.false_embedder(z_so_far)
 
         # Positional embedding
         z_pos = Lambda(self.get_pos_seq)(z_so_far)
@@ -500,12 +506,20 @@ class InterimDecoder():
 
         def gen_zeros(sample_vec):
             batch_size = K.shape(sample_vec)[0]
-            return tf.keras.backend.random_normal([batch_size, self.width], mean=0.0, stddev=0.01,
+            z0 =  tf.keras.backend.random_normal([batch_size, self.width], mean=0.0, stddev=0.01,
                                                   dtype='float')
+
+            # Obfuscate shape to counter bug in TimeDistributed
+            # This z0 is the first time the FalseEmbedder will be used
+            # It has known shape [?, width]; so the FalseEmbedder expects this shape, but it should
+            # be able to take [?, ?] as an input...
+            z0 = K.reshape(z0, shape=[batch_size, -1])
+            return z0
             # return tf.keras.backend.zeros([batch_size, self.decoder_width], dtype='float', name='zeros')
 
         # initialise
         z_zero = Lambda(gen_zeros, name='z_zero')(enc_output)
+
         output_mean, output_logvar, output_z = self.compute_next_z(src_seq, enc_output, z_zero)
 
         # This method calculates the first 'width' elements of the latent space
@@ -558,6 +572,64 @@ class InterimDecoder():
         return pos * mask
 
 
+class FalseEmbeddings():
+    def __init__(self, d_emb):
+        '''
+        Given a 1D vector, attempts to create 'false' embeddings to
+        go from latent space
+        :param d_emb: dimensionality of false embeddings
+        '''
+        self.init_layer = TimeDistributed(Dense(d_emb, activation=None, input_shape=(1,)))
+        self.deep_layers = [TimeDistributed(Dense(d_emb, activation=None, input_shape=(d_emb,))) for _ in
+                            range(NUM_LAYERS)]
+        #
+        # self.scales = []
+        # for layer in self.deep_layers:
+        #     scale = K.variable(value=1, dtype=np.float)
+        #     self.scales.append(scale)
+        #     layer.trainable_weights.extend([scale])
+
+        self.activation = Lambda(activations.tanh)
+
+        # self.deep_layers[-1].trainable_weights.extend(self.scale)
+
+    def __call__(self, z):
+        '''
+
+        :param z: Input with dimensionality [batch_size, d] or [batch_size, d, 1]
+        :return: Falsely embedded output with dimensionality [batch_size, d, d_emb]
+        '''
+
+        if z.shape.ndims == 2:
+            z = Lambda(lambda x: K.expand_dims(x, axis=2))(z)
+
+        # use fully connected layer to expand to [batch_size, d, d_emb]
+
+        z = self.init_layer(z)
+        print(z.shape)
+        for (i, layer) in enumerate(self.deep_layers):
+            y = layer(z)
+            z = Lambda(lambda a: a[0] + a[1])([y, z])
+            z = self.activation(z)
+            # arg = Multiply()([self.scales[i], arg])
+            # arg *= self.scales[i]
+            # arg = Dropout(rate=0.2)(arg)
+
+        return z
+
+        # def embed(arg):
+        #     arg = self.init_layer(arg)
+        #
+        #     for (i,layer) in enumerate(self.deep_layers):
+        #         y = layer(arg)
+        #         arg = self.activation(y + arg)
+        #         # arg = Multiply()([self.scales[i], arg])
+        #         # arg *= self.scales[i]
+        #         # arg = Dropout(rate=0.2)(arg)
+        #
+        # return Lambda(embed)(z)
+
+
 class LatentToEmbedded():
     def __init__(self, d_model, latent_dim=None, stddev=1):
         if latent_dim is None:
@@ -571,10 +643,9 @@ class LatentToEmbedded():
                 epsilon = K.random_normal(shape=(batch_size, len_limit, d_model), mean=0., stddev=self.stddev)
                 return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, len_limit, d_model])
 
-            self.expander_layer = None
+            self.expander = None
         else:
-            self.expander_layer = Dense(d_model, input_shape=(1,))
-            self.layers = [TimeDistributed(Dense(d_model, input_shape=(d_model,), activation=ACT)) for _ in range(NUM_LAYERS)]
+            self.expander = FalseEmbeddings(d_model)
 
             def sampling(args):
                 z_mean_, z_logvar_ = args
@@ -598,13 +669,10 @@ class LatentToEmbedded():
 
         # If there is a bottleneck, we need to expand back to model dimension
         # Now size (batch_size, latent_dim, d_model)
-        if self.expander_layer is None:
+        if self.expander is None:
             expanded_z = sampled_z
         else:
-            expanded_z = self.expander_layer(Lambda(K.expand_dims)(sampled_z))
-
-            for layer in self.layers:
-                expanded_z = layer(expanded_z)
+            expanded_z = self.expander(sampled_z)
 
         return sampled_z, expanded_z  # self.expander_layer(sampled_z)
 
@@ -636,10 +704,6 @@ class DecoderFromLatent():
         # Don't want encoder mask as there should be no padding from latent dim
         enc_mask = None
         # Lambda(lambda x: GetPadMask(x[0], x[1]), name='DecoderEncMask')([tgt_seq, src_seq])
-
-        pr = Lambda(lambda x: tf.Print(x, [x], "\nDECODER ENC_MASK: ", summarize=100))
-
-        pr2 = Lambda(lambda x: tf.Print(x, [x], "\nDECODER SELF_MASK: ", summarize=100))
 
         if return_att: self_atts, enc_atts = [], []
 
@@ -723,102 +787,3 @@ class AddPosEncoding:
 
 
 add_layer = Lambda(lambda x: x[0] + x[1], output_shape=lambda x: x[0])
-
-
-# use this because keras may get wrong shapes with Add()([])
-class QANet_ConvBlock:
-    def __init__(self, dim, n_conv=2, kernel_size=7, dropout=0.1):
-        self.convs = [SeparableConv1D(dim, kernel_size, activation='relu', padding='same') for _ in range(n_conv)]
-        self.norm = LayerNormalization()
-        self.dropout = Dropout(dropout)
-
-    def __call__(self, x):
-        for i in range(len(self.convs)):
-            z = self.norm(x)
-            if i % 2 == 0: z = self.dropout(z)
-            z = self.convs[i](z)
-            x = add_layer([x, z])
-        return x
-
-
-class QANet_Block:
-    def __init__(self, dim, n_head, n_conv, kernel_size, dropout=0.1, add_pos=True):
-        self.conv = QANet_ConvBlock(dim, n_conv=n_conv, kernel_size=kernel_size, dropout=dropout)
-        self.self_att = MultiHeadAttention(n_head=n_head, d_model=dim,
-                                           d_k=dim // n_head, d_v=dim // n_head,
-                                           dropout=dropout, use_norm=False)
-        self.feed_forward = PositionwiseFeedForward(dim, dim, dropout=dropout)
-        self.norm = LayerNormalization()
-        self.add_pos = add_pos
-
-    def __call__(self, x, mask):
-        if self.add_pos: x = AddPosEncoding()(x)
-        x = self.conv(x)
-        z = self.norm(x)
-        z, _ = self.self_att(z, z, z, mask)
-        x = add_layer([x, z])
-        z = self.norm(x)
-        z = self.feed_forward(z)
-        x = add_layer([x, z])
-        return x
-
-
-class QANet_Encoder:
-    def __init__(self, dim=128, n_head=8, n_conv=2, n_block=1, kernel_size=7, dropout=0.1, add_pos=True):
-        self.dim = dim
-        self.n_block = n_block
-        self.conv_first = SeparableConv1D(dim, 1, padding='same')
-        self.enc_block = QANet_Block(dim, n_head=n_head, n_conv=n_conv, kernel_size=kernel_size,
-                                     dropout=dropout, add_pos=add_pos)
-
-    def __call__(self, x, mask):
-        if K.int_shape(x)[-1] != self.dim:
-            x = self.conv_first(x)
-        for i in range(self.n_block):
-            x = self.enc_block(x, mask)
-        return x
-
-#
-# if __name__ == '__main__':
-#     itokens = TokenList(list('0123456789'))
-#     otokens = TokenList(list('0123456789abcdefx'))
-#
-#
-#     def GenSample():
-#         x = random.randint(0, 99999)
-#         y = hex(x);
-#         x = str(x)
-#         return x, y
-#
-#
-#     X, Y = [], []
-#     for _ in range(100000):
-#         x, y = GenSample()
-#         X.append(list(x))
-#         Y.append(list(y))
-#
-#     X, Y = pad_to_longest(X, itokens), pad_to_longest(Y, otokens)
-#     print(X.shape, Y.shape)
-#
-#     s2s = Transformer(itokens, otokens, 10, 15)
-#     lr_scheduler = LRSchedulerPerStep(256, 4000)
-#     s2s.compile('adam')
-#     s2s.model.summary()
-#
-#
-#     class TestCallback(Callback):
-#         def on_epoch_end(self, epoch, logs=None):
-#             print('\n')
-#             for test in [123, 13245, 33467]:
-#                 ret = s2s.decode_sequence(str(test))
-#                 print(test, ret, hex(test))
-#             print('\n')
-#
-#
-#     TestCallback().on_epoch_end(1)
-#
-#     # s2s.model.load_weights('model.h5')
-#     s2s.model.fit([X, Y], None, batch_size=256, epochs=40,
-#                   validation_split=0.05,
-#                   callbacks=[TestCallback(), lr_scheduler])
-#     s2s.model.save_weights('model.h5')
