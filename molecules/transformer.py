@@ -604,9 +604,8 @@ class FalseEmbeddings():
             z = Lambda(lambda x: K.expand_dims(x, axis=2))(z)
 
         # use fully connected layer to expand to [batch_size, d, d_emb]
-
         z = self.init_layer(z)
-        print(z.shape)
+
         for (i, layer) in enumerate(self.deep_layers):
             y = layer(z)
             z = Lambda(lambda a: a[0] + a[1])([y, z])

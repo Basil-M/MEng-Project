@@ -20,7 +20,7 @@ k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
 NUM_EPOCHS = 10
-BATCH_SIZE = 1
+BATCH_SIZE = 20
 LATENT_DIM = 128
 RANDOM_SEED = 14029
 DATA = 'data/zinc_100k.txt'
@@ -28,7 +28,7 @@ DATA = 'data/zinc_100k.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
 # MODEL_NAME = 'attn'
-MODEL_NAME = 'test_10'
+MODEL_NAME = 'test_12'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
