@@ -602,7 +602,12 @@ class TriTransformer:
         self.autoencoder.metrics_tensors.append(self.ppl)
         self.autoencoder.metrics_names.append('accu')
         self.autoencoder.metrics_tensors.append(self.accu)
-
+        #
+        # # FOR DEBUGGING
+        # self.autoencoder.metrics_names.append('mean_enc')
+        # self.autoencoder.metrics_tensors.append(Lambda(tf.reduce_mean)(enc_output))
+        # self.autoencoder.metrics_names.append('mean_FE')
+        # self.autoencoder.metrics_tensors.append(Lambda(tf.reduce_mean)(enc_output))
         if pp is not None:
             self.autoencoder.metrics_names.append('pp_loss')
             self.autoencoder.metrics_tensors.append(pp)

@@ -364,7 +364,8 @@ class InterimDecoder():
 
         # False embedder to go from latent dim to what decoder expects
         if false_emb is None:
-            self.false_embedder = TimeDistributed(Dense(d_model, input_shape=(1,), activation=ACT, name='latent_embedder'))
+            # Don't share embedder with AK
+            self.false_embedder = FalseEmbeddings(d_model)
         else:
             self.false_embedder = false_emb
 
@@ -579,6 +580,7 @@ class FalseEmbeddings():
         go from latent space
         :param d_emb: dimensionality of false embeddings
         '''
+        NUM_LAYERS = 3
         self.init_layer = TimeDistributed(Dense(d_emb, activation=None, input_shape=(1,)))
         self.deep_layers = [TimeDistributed(Dense(d_emb, activation=None, input_shape=(d_emb,))) for _ in
                             range(NUM_LAYERS)]
@@ -589,7 +591,7 @@ class FalseEmbeddings():
         #     self.scales.append(scale)
         #     layer.trainable_weights.extend([scale])
 
-        self.activation = Lambda(activations.tanh)
+        self.activation = Lambda(lambda x: activations.relu(x, alpha=1E-4))
 
         # self.deep_layers[-1].trainable_weights.extend(self.scale)
 
@@ -607,8 +609,8 @@ class FalseEmbeddings():
         z = self.init_layer(z)
 
         for (i, layer) in enumerate(self.deep_layers):
-            y = layer(z)
-            z = Lambda(lambda a: a[0] + a[1])([y, z])
+            z = layer(z)
+            # z = Lambda(lambda a: a[0] + a[1])([y, z])
             z = self.activation(z)
             # arg = Multiply()([self.scales[i], arg])
             # arg *= self.scales[i]
