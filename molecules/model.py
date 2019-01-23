@@ -374,7 +374,8 @@ class TriTransformer:
                                              p.get("d_v"),
                                              p.get("layers"), p.get("dropout"), word_emb=i_word_emb, pos_emb=pos_emb)
 
-        self.false_embedder = tr.FalseEmbeddings(d_emb=self.d_model)
+        # self.false_embedder = tr.FalseEmbeddings(d_emb=self.d_model)
+        self.false_embedder = tr.FalseEmbeddingsNonTD(d_emb=self.d_model, d_latent=p.get("latent_dim"))
 
         if p.get("bottleneck") == "average":
             self.encoder_to_latent = tr.AvgLatent(p.get("d_model"), p.get("latent_dim"))
@@ -411,7 +412,7 @@ class TriTransformer:
                                             p.get("layers"), p.get("dropout"),
                                             word_emb=o_word_emb, pos_emb=pos_emb)
         self.target_layer = TimeDistributed(Dense(o_tokens.num(), use_bias=False))
-        self.target_softmax = Softmax()
+        # self.target_softmax = Softmax()
 
         if self.stddev == 0 or self.stddev is None:
             self.kl_loss_var = None
@@ -477,10 +478,9 @@ class TriTransformer:
                                                          active_layers=active_layers,
                                                          return_att=True)
 
-
         dec_output = debugPrint(dec_output, "DEC_OUTPUT")
         final_output = self.target_layer(dec_output)
-        final_output = Softmax()(final_output)
+        # final_output = Softmax()(final_output)
         final_output = debugPrint(final_output, "FINAL_OUTPUT")
 
         # Property prediction

@@ -28,7 +28,7 @@ DATA = 'data/zinc_100k.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
 # MODEL_NAME = 'attn'
-MODEL_NAME = 'test_12'
+MODEL_NAME = 'test_15'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -271,7 +271,7 @@ def main():
                                      write_images=True,
                                      update_freq='batch'))
 
-        if args.bottleneck == "none":
+        if args.bottleneck != "none":
             model.compile_vae(Adam(args.base_lr, 0.9, 0.98))
         else:
             # avoid exploding gradients

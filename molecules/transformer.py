@@ -291,7 +291,7 @@ class VariationalEncoder():
         return (h, atts) if return_att else h
 
 
-NUM_LAYERS = 2
+NUM_LAYERS = 5
 ACT = 'relu'
 
 
@@ -573,6 +573,7 @@ class InterimDecoder():
         return pos * mask
 
 
+
 class FalseEmbeddings():
     def __init__(self, d_emb):
         '''
@@ -580,9 +581,9 @@ class FalseEmbeddings():
         go from latent space
         :param d_emb: dimensionality of false embeddings
         '''
-        NUM_LAYERS = 3
-        self.init_layer = TimeDistributed(Dense(d_emb, activation=None, input_shape=(1,)))
-        self.deep_layers = [TimeDistributed(Dense(d_emb, activation=None, input_shape=(d_emb,))) for _ in
+
+        self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,)))
+        self.deep_layers = [TimeDistributed(Dense(d_emb, activation=ACT, input_shape=(d_emb,))) for _ in
                             range(NUM_LAYERS)]
         #
         # self.scales = []
@@ -591,7 +592,7 @@ class FalseEmbeddings():
         #     self.scales.append(scale)
         #     layer.trainable_weights.extend([scale])
 
-        self.activation = Lambda(lambda x: activations.relu(x, alpha=1E-4))
+        # self.activation = Lambda(lambda x: activations.relu(x))
 
         # self.deep_layers[-1].trainable_weights.extend(self.scale)
 
@@ -611,7 +612,7 @@ class FalseEmbeddings():
         for (i, layer) in enumerate(self.deep_layers):
             z = layer(z)
             # z = Lambda(lambda a: a[0] + a[1])([y, z])
-            z = self.activation(z)
+            # z = self.activation(z)
             # arg = Multiply()([self.scales[i], arg])
             # arg *= self.scales[i]
             # arg = Dropout(rate=0.2)(arg)
@@ -630,6 +631,56 @@ class FalseEmbeddings():
         #
         # return Lambda(embed)(z)
 
+class FalseEmbeddingsNonTD():
+    def __init__(self, d_emb, d_latent, residual = True):
+        '''
+        Given a 1D vector, attempts to create 'false' embeddings to
+        go from latent space
+        :param d_emb: dimensionality of false embeddings
+        '''
+
+        NUM_LAYERS = 3
+        self.init_layer = Dense(d_emb * d_latent, input_shape=(d_latent,))
+
+        # self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,)))
+        self.deep_layers = [Dense(d_emb*d_latent, activation=ACT, input_shape=(d_emb*d_latent,)) for _ in
+                            range(NUM_LAYERS)]
+
+        # Whether or not to employ residual connection
+        self.residual = residual
+
+        self.activation = Lambda(lambda x: activations.relu(x))
+        self.norm = BatchNormalization()
+
+        self.final_shape = Lambda(lambda x: K.reshape(x, [-1, d_latent, d_emb]))
+    def __call__(self, z):
+        '''
+
+        :param z: Input with dimensionality [batch_size, d] or [batch_size, d, 1]
+        :return: Falsely embedded output with dimensionality [batch_size, d, d_emb]
+        '''
+
+
+        # use fully connected layer to expand to [batch_size, d, d_emb]
+        z = self.init_layer(z)
+
+        for (i, layer) in enumerate(self.deep_layers):
+            if self.residual:
+                z = Add()([z, layer(z)])
+                # z = z + layer(z)
+            else:
+                z = layer(z)
+
+            # z = Lambda(lambda a: a[0] + a[1])([y, z])
+            z = self.activation(z)
+            z = self.norm(z)
+            z = Dropout(rate=0.4)(z)
+            # arg = Multiply()([self.scales[i], arg])
+            # arg *= self.scales[i]
+            # arg = Dropout(rate=0.2)(arg)
+
+        z = self.final_shape(z)
+        return z
 
 class LatentToEmbedded():
     def __init__(self, d_model, latent_dim=None, stddev=1):
