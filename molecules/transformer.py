@@ -638,20 +638,21 @@ class FalseEmbeddingsNonTD():
         go from latent space
         :param d_emb: dimensionality of false embeddings
         '''
-
-        NUM_LAYERS = 3
+        NUM_LAYERS = 1
         self.init_layer = Dense(d_emb * d_latent, input_shape=(d_latent,))
 
         # self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,)))
-        self.deep_layers = [Dense(d_emb*d_latent, activation=ACT, input_shape=(d_emb*d_latent,)) for _ in
+        self.deep_layers = [Dense(d_latent, activation=ACT, input_shape=(d_latent,)) for _ in
                             range(NUM_LAYERS)]
 
+        self.deep_time_layers = [TimeDistributed(Dense(d_emb, activation=ACT, input_shape=(d_emb,))) for _ in
+                            range(NUM_LAYERS)]
         # Whether or not to employ residual connection
         self.residual = residual
 
         self.activation = Lambda(lambda x: activations.relu(x))
         self.norm = BatchNormalization()
-
+        self.time_norm = TimeDistributed(BatchNormalization())
         self.final_shape = Lambda(lambda x: K.reshape(x, [-1, d_latent, d_emb]))
     def __call__(self, z):
         '''
@@ -662,7 +663,6 @@ class FalseEmbeddingsNonTD():
 
 
         # use fully connected layer to expand to [batch_size, d, d_emb]
-        z = self.init_layer(z)
 
         for (i, layer) in enumerate(self.deep_layers):
             if self.residual:
@@ -671,15 +671,27 @@ class FalseEmbeddingsNonTD():
             else:
                 z = layer(z)
 
+            z = self.norm(z)
             # z = Lambda(lambda a: a[0] + a[1])([y, z])
             z = self.activation(z)
-            z = self.norm(z)
-            z = Dropout(rate=0.4)(z)
+            # z = Dropout(rate=0.4)(z)
             # arg = Multiply()([self.scales[i], arg])
             # arg *= self.scales[i]
             # arg = Dropout(rate=0.2)(arg)
 
+        z = self.init_layer(z)
         z = self.final_shape(z)
+
+        for layer in self.deep_time_layers:
+            if self.residual:
+                z = Add()([z, layer(z)])
+            else:
+                z = layer(z)
+
+            z = self.time_norm(z)
+            z = self.activation(z)
+            # z = Dropout(rate=0.4)(z)
+
         return z
 
 class LatentToEmbedded():
