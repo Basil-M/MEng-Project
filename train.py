@@ -28,7 +28,7 @@ DATA = 'data/zinc_100k.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
 # MODEL_NAME = 'attn'
-MODEL_NAME = 'test_19'
+MODEL_NAME = 'test_22'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options

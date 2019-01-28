@@ -381,13 +381,13 @@ class TriTransformer:
             self.encoder_to_latent = tr.AvgLatent(p.get("d_model"), p.get("latent_dim"))
         elif p.get("bottleneck") == "interim_decoder":
             latent_pos_emb = tr.Embedding(p.get("latent_dim"), p.get("ID_d_model"), trainable=False)
-            self.encoder_to_latent = tr.InterimDecoder(p.get("ID_d_model"), p.get("ID_d_inner_hid"),
-                                                       p.get("ID_heads"), p.get("ID_d_k"), p.get("ID_d_v"),
-                                                       p.get("ID_layers"), p.get("ID_width"), p.get("dropout"),
-                                                       stddev=p.get("stddev"),
-                                                       latent_dim=p.get("latent_dim"),
-                                                       pos_emb=latent_pos_emb,
-                                                       false_emb=self.false_embedder)
+            self.encoder_to_latent = tr.InterimDecoder2(p.get("ID_d_model"), p.get("ID_d_inner_hid"),
+                                                        p.get("ID_heads"), p.get("ID_d_k"), p.get("ID_d_v"),
+                                                        p.get("ID_layers"), p.get("ID_width"), p.get("dropout"),
+                                                        stddev=p.get("stddev"),
+                                                        latent_dim=p.get("latent_dim"),
+                                                        pos_emb=latent_pos_emb,
+                                                        false_emb=self.false_embedder)
 
         elif p.get("bottleneck") == "none":
             self.encoder_to_latent = tr.Vec2Variational(p.get("d_model"), self.len_limit)
@@ -459,7 +459,7 @@ class TriTransformer:
         enc_output = debugPrint(enc_output, "ENC_OUTPUT")
 
         if self.bottleneck == "interim_decoder":
-            z_mean, z_logvar, _ = self.encoder_to_latent(src_seq, enc_output)
+            z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
         else:
             z_mean, z_logvar = self.encoder_to_latent(enc_output)
 
@@ -516,40 +516,14 @@ class TriTransformer:
             z_mean_, z_log_var_ = args
 
             return - 0.5 * self.kl_loss_var * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_),
-                                                            name='KL_loss_sum')
+                                                             name='KL_loss_sum')
 
         # PROPERTY PREDICTION LOSS
         def pp_loss(args):
             prop_input_, prop_output_ = args
             SE = K.pow(prop_input_ - prop_output_, 2)
             SE = tf.reduce_sum(SE)
-            return self.pp_loss_var * K.sqrt(SE)/K.shape(prop_output)[0]
-
-            # def get_loss(args):
-            #     y_pred, y_true, z_mean_, z_log_var_ = args
-            #
-            #     # RECONSTRUCTION LOSS
-            #     y_true = tf.cast(y_true, 'int32')
-            #     loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true, logits=y_pred)
-            #     mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
-            #     loss = tf.reduce_sum(loss * mask, -1) / tf.reduce_sum(mask, -1)
-            #     loss = K.mean(loss)
-            #
-            #     # z_mean_ = tf.Print(z_mean_, [z_mean_], "\nLOSS CALCS: z_mean_: ", summarize=SUM_AM)
-            #     # z_log_var_ = tf.Print(z_log_var_, [z_log_var_], "\nLOSS CALCS: z_log_var_: ", summarize=SUM_AM)
-            #
-            #     # KL LOSS
-            #     if self.stddev == 0 or self.stddev is None:
-            #         print("No VAE loss!")
-            #     else:
-            #         if self.stddev == 0.01:
-            #             kl_loss = - 0.5 * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_),
-            #                                              name='KL_loss_sum')
-            #         else:
-            #             kl_loss = - 0.5 * tf.reduce_sum(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_),
-            #                                             name='KL_loss_sum')
-            #         loss += self.kl_loss_var*kl_loss
-            #     return loss
+            return self.pp_loss_var * K.sqrt(SE) / K.shape(prop_output)[0]
 
         def get_accu(args):
             y_pred, y_true = args
@@ -602,12 +576,7 @@ class TriTransformer:
         self.autoencoder.metrics_tensors.append(self.ppl)
         self.autoencoder.metrics_names.append('accu')
         self.autoencoder.metrics_tensors.append(self.accu)
-        #
-        # # FOR DEBUGGING
-        # self.autoencoder.metrics_names.append('mean_enc')
-        # self.autoencoder.metrics_tensors.append(Lambda(tf.reduce_mean)(enc_output))
-        # self.autoencoder.metrics_names.append('mean_FE')
-        # self.autoencoder.metrics_tensors.append(Lambda(tf.reduce_mean)(enc_output))
+
         if pp is not None:
             self.autoencoder.metrics_names.append('pp_loss')
             self.autoencoder.metrics_tensors.append(pp)
@@ -615,20 +584,7 @@ class TriTransformer:
         if kl is not None:
             self.autoencoder.metrics_names.append('kl_loss')
             self.autoencoder.metrics_tensors.append(kl)
-        # self.autoencoder.metrics_names.append('meanmean')
-        # self.autoencoder.metrics_tensors.append(self.meanz)
 
-        # if self.stddev != 0 and self.stddev is not None:
-        #     self.autoencoder.metrics_names.append('meanlogvar')
-        #     self.meanzvar = Lambda(tf.reduce_mean)(z_logvar)
-        #     self.autoencoder.metrics_tensors.append(self.meanzvar)
-
-        # session = K.get_session()
-        # for layer in self.autoencoder.layers:
-        #     if hasattr(layer, 'kernel_initializer'):
-        #         print("Running kernel initialiser for {}".format(layer.name))
-        #         layer.kernel.initializer.run(session=session)
-        # self.autoencoder.summary()
         # self.make_fast_decode_model()
 
     def make_src_seq_matrix(self, input_seq):

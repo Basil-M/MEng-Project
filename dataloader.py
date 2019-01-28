@@ -87,7 +87,7 @@ class AttnParams:
             "pp_epochs": 15,
             "pp_layers": 3,
             "model_arch": "TRANSFORMER",
-            "bottleneck": "average"
+            "bottleneck": "interim_decoder"
         }
 
     def get(self, param):
