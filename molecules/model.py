@@ -294,7 +294,7 @@ class TriTransformer:
         def kl_loss2(args):
             mean_, logvar_, z_ = args
             kl_loss = -K.square(z_) - K.square(z_ - mean_)/K.exp(logvar_) - logvar_
-            kl_loss = 0.5*K.sum(kl_loss, axis=1)
+            kl_loss = -0.5*K.sum(kl_loss, axis=1)
             return self.kl_loss_var*K.sum(kl_loss, axis=0)
 
         # PROPERTY PREDICTION LOSS

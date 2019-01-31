@@ -22,13 +22,12 @@ import dataloader as dd
 NUM_EPOCHS = 7
 BATCH_SIZE = 20
 LATENT_DIM = 128
-RANDOM_SEED = 14029
+RANDOM_SEED = 1403
 DATA = 'data/zinc_100k.txt'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-# MODEL_NAME = 'attn'
-MODEL_NAME = 'avg_model1282'
+MODEL_NAME = 'avg_model'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
