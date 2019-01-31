@@ -60,22 +60,22 @@ class AttnParams:
         self._params = {
             "d_file": None,
             "current_epoch": 1,
-            "epochs": 50,
+            "epochs": 25,
             "kl_pretrain_epochs": 2,
             "kl_anneal_epochs": 5,
             "kl_max_weight": 1,
-            "pp_weight": 0,
+            "pp_weight": 1,
             "ae_trained": False,
-            "batch_size": 64,
+            "batch_size": 20,
             "len_limit": 120,
-            "d_model": 24,
-            "d_inner_hid": 128,
-            "heads": 4,
-            "d_k": 4,
-            "d_v": 4,
+            "d_model": 140,
+            "d_inner_hid": 528,
+            "heads": 14,
+            "d_k": 10,
+            "d_v": 10,
             "layers": 1,
             "dropout": 0.1,
-            "latent_dim": 20,  # 64
+            "latent_dim": 128,  # 64
             "ID_d_model": None,
             "ID_d_inner_hid": None,
             "ID_heads": None,
@@ -87,7 +87,7 @@ class AttnParams:
             "pp_epochs": 15,
             "pp_layers": 3,
             "model_arch": "TRANSFORMER",
-            "bottleneck": "interim_decoder"
+            "bottleneck": "average"
         }
 
     def get(self, param):

@@ -585,9 +585,10 @@ class InterimDecoder2():
         self.width = decoder_width
 
         # Calculate 'decoder_width' means/variances from output
-        self.mean_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_mean_layer')
-        self.logvar_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_logvar_layer')
-
+        # self.mean_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_mean_layer')
+        # self.logvar_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_logvar_layer')
+        self.mean_layer = Dense(self.latent_dim, input_shape=(self.latent_dim* d_model,), name='ID2_mean_layer')
+        self.logvar_layer = Dense(self.latent_dim, input_shape=(self.latent_dim* d_model,), name='ID2_logvar_layer')
         # For the very first vector
         self.attn = TimeDistributed(Dense(self.width, input_shape=(d_model,), activation='linear'), name='ID2_ATTN')
 
@@ -618,13 +619,16 @@ class InterimDecoder2():
             # s = Lambda(lambda x: x[:, :self.latent_dim, :],name="ID2_FINAL_SLICE")
             # z_embedded = s(z_embedded)
             z_embedded = z_embedded[:, :self.latent_dim, :]
-            z_embedded = K.reshape(z_embedded, [-1, self.latent_dim, self.d_model])
+            # z_embedded = K.reshape(z_embedded, [-1, self.latent_dim, self.d_model])
+            z_embedded = K.reshape(z_embedded, [-1, self.latent_dim*self.d_model])
             return z_embedded
             # return K.reshape(z_embedded, )
 
         z_emb = Lambda(the_loop)(z_init)
-        means = self.squeeze(self.mean_layer(z_emb))
-        logvars = self.squeeze(self.logvar_layer(z_emb))
+        # means = self.squeeze(self.mean_layer(z_emb))
+        # logvars = self.squeeze(self.logvar_layer(z_emb))
+        means = self.mean_layer(z_emb)
+        logvars = self.logvar_layer(z_emb)
         return means, logvars
 
     def compute_next_z(self, z_so_far, src_seq, enc_output):
@@ -776,22 +780,23 @@ class FalseEmbeddingsNonTD():
         go from latent space
         :param d_emb: dimensionality of false embeddings
         '''
-        NUM_LAYERS = 1
-        self.init_layer = Dense(d_emb * d_latent, input_shape=(d_latent,))
+        NUM_LAYERS = 0
+        latent_len = 50
+        self.init_layer = Dense(d_emb * latent_len, input_shape=(d_latent,))
 
         # self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,)))
         self.deep_layers = [Dense(d_latent, activation=ACT, input_shape=(d_latent,)) for _ in
                             range(NUM_LAYERS)]
 
-        self.deep_time_layers = [TimeDistributed(Dense(d_emb, activation=ACT, input_shape=(d_emb,))) for _ in
-                                 range(NUM_LAYERS)]
+        # self.deep_time_layers = [TimeDistributed(Dense(d_emb, activation=ACT, input_shape=(d_emb,))) for _ in
+        #                          range(NUM_LAYERS)]
 
         # Whether or not to employ residual connection
         self.residual = residual
         self.activation = Lambda(lambda x: activations.relu(x))
         self.norm = BatchNormalization()
-        self.time_norm = TimeDistributed(BatchNormalization())
-        self.final_shape = Lambda(lambda x: K.reshape(x, [-1, d_latent, d_emb]))
+        # self.time_norm = TimeDistributed(BatchNormalization())
+        self.final_shape = Lambda(lambda x: K.reshape(x, [-1, latent_len, d_emb]))
 
     def __call__(self, z):
         '''

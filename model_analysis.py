@@ -2,10 +2,10 @@ from tensor2tensor.visualization import attention
 import h5py
 import numpy as np
 from sample_latent import visualize_latent_rep
-from molecules.model import Transformer
+from molecules.model import TriTransformer
 from dataloader import SmilesToArray, AttnParams, MakeSmilesDict, MakeSmilesData
 from keras.optimizers import Adam
-from utils import LoadCSV
+from utils import LoadList
 from rdkit import Chem
 from scipy.stats import gaussian_kde, rv_histogram, rv_continuous, entropy
 import argparse
@@ -22,7 +22,7 @@ class rv_gaussian(rv_continuous):
 def get_arguments():
     parser = argparse.ArgumentParser(description='Molecular autoencoder analysis')
     parser.add_argument('--model_path', type=str, help='Path to model directory e.g. models/VA_192/',
-                        default="models/VAI_128_64/")
+                        default="models/avg_model128/")
     return parser.parse_args()
 
 def visualise_latents(latents_file):
@@ -55,7 +55,7 @@ def latent_distributions(latents_file, plot_kd = False):
 
     return KL_div
 
-def property_distributions(test_data, num_seeds, num_decodings, attn_model: Transformer, beam_width=1):
+def property_distributions(test_data, num_seeds, num_decodings, attn_model: TriTransformer, beam_width=1):
     # Get random seeds from test_data
     indices = np.array(range(0, len(test_data)))
     np.random.shuffle(indices)
@@ -106,38 +106,33 @@ def main():
 
     # Get data
     d_file = model_params.get("d_file")
-    data = [d[0] for d in LoadCSV(d_file)]  # List of SMILES strings
-    tokens = MakeSmilesDict(d_file, dict_file=d_file.replace('.txt', '_dict.txt'))
+    data = LoadList(d_file)  # List of SMILES strings
 
+    tokens = MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
 
     # Prepare model
-    model = Transformer(tokens, model_params)
+    model = TriTransformer(tokens, model_params)
     model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9))
-    model.autoencoder.load_weights(model_dir + "best_model.h5")
+    model.autoencoder.load_weights(model_dir + "best_model.h5", by_name=True)
 
-    # # Test random molecule
-    # print(IBUPROFEN_SMILES)
-    # # print(model.beam_search(IBUPROFEN_SMILES,5)[0][0])
-    # model.encode_model.load_weights(model_dir + "best_model.h5", by_name=True)
-    # model.decode_model.load_weights(model_dir + "best_model.h5", by_name=True)
-    # s = model.beam_search(IBUPROFEN_SMILES,5)
-    # [print(seq[0]) for seq in s]
-    # # print(s)
-    # # print(model.beam_search(IBUPROFEN_SMILES,5)[1][0])
-    #
-    # data_mu, data_sigma, gen_mu, gen_sigma, frac_valid = property_distributions(data,
-    #                                                                             num_seeds=100,
-    #                                                                             num_decodings=5,
-    #                                                                             attn_model=model,
-    #                                                                             beam_width=2)
-    #
-    # print("Data QED:\t {:.2f} ± {:.2f}".format(data_mu, data_sigma))
-    # print("Gen QED:\t {:.2f} ± {:.2f}".format(gen_mu, gen_sigma))
-    # print("Valid mols:\t {:.2f}".format(frac_valid))
+    # Test random molecule
+    print(IBUPROFEN_SMILES)
+    model.encode_model.load_weights(model_dir + "best_model.h5", by_name=True)
+    model.decode_model.load_weights(model_dir + "best_model.h5", by_name=True)
+    s = model.beam_search(IBUPROFEN_SMILES,5)
+    [print(seq[0]) for seq in s]
+    data_mu, data_sigma, gen_mu, gen_sigma, frac_valid = property_distributions(data,
+                                                                                num_seeds=100,
+                                                                                num_decodings=5,
+                                                                                attn_model=model,
+                                                                                beam_width=2)
+
+    print("Data QED:\t {:.2f} ± {:.2f}".format(data_mu, data_sigma))
+    print("Gen QED:\t {:.2f} ± {:.2f}".format(gen_mu, gen_sigma))
+    print("Valid mols:\t {:.2f}".format(frac_valid))
 
     print(latent_distributions(model_dir+'latents.h5'))
-    # visualise_attention('Cc1ccccc1', model, model_params, tokens)
-    # visualise_latents(model_dir + 'latents.h5')
+
 
 
 if __name__ == '__main__':
