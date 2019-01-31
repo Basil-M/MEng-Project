@@ -1,13 +1,9 @@
-from tensor2tensor.visualization import attention
 import h5py
 import numpy as np
-from sample_latent import visualize_latent_rep
 from molecules.model import TriTransformer
 from dataloader import SmilesToArray, AttnParams, MakeSmilesDict, MakeSmilesData
 from keras.optimizers import Adam
-from utils import LoadList
-from rdkit import Chem
-from scipy.stats import gaussian_kde, rv_histogram, rv_continuous, entropy, kurtosis
+from scipy.stats import rv_continuous, kurtosis
 import argparse
 from os.path import exists
 
