@@ -60,6 +60,8 @@ def main():
         f = open(args.outfile, 'w')
         for struct in structures:
             # canonicalise
+            struct = ''.join(struct)
+            #print(struct)
             mol = Chem.MolFromSmiles(struct)
             if mol:
                 struct = Chem.MolToSmiles(mol)
