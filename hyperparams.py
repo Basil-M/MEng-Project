@@ -11,7 +11,7 @@ from hyperas.distributions import quniform, choice
 from molecules.model import TriTransformer
 import dataloader as dd
 from utils import WeightAnnealer_epoch
-
+from os import getenv
 MODEL_ARCH = 'TRANSFORMER'
 MODEL_NAME = 'avg_model'
 MODEL_DIR = 'models/'
@@ -51,6 +51,15 @@ def create_model(x_train, y_train, x_test, y_test):
     The last one is optional, though recommended, namely:
         - model: specify the model just created so that we can later use it again.
     """
+    ## NUMBER OF GPUS
+    # GET NUMBER OF AVAILABLE GPUS
+    CUDA_VISIBLE_DEVICES = getenv('CUDA_VISIBLE_DEVICES')
+    if CUDA_VISIBLE_DEVICES is None:
+        N_GPUS = 1
+    else:
+        N_GPUS = len(CUDA_VISIBLE_DEVICES.split(","))
+
+    ## PARAMETERS
     params = dd.AttnParams()
     params.set("latent_dim", 296)
     params.set("bottleneck", "average")
@@ -89,8 +98,11 @@ def create_model(x_train, y_train, x_test, y_test):
                                    init_epochs=params.get("kl_pretrain_epochs")))
 
     model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
+    if N_GPUS > 1:
+        from keras.utils.training_utils import multi_gpu_model
+        model.autoencoder = multi_gpu_model(model.autoencoder, N_GPUS)
 
-    result = model.autoencoder.fit(x_train, None, batch_size=25,
+    result = model.autoencoder.fit(x_train, None, batch_size=25*N_GPUS,
                                    epochs=3,
                                    validation_data=(x_test, None),
                                    callbacks=cb)
