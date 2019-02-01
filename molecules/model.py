@@ -107,8 +107,9 @@ class MoleculeVAE():
 # https://github.com/Lsdefine/attention-is-all-you-need-keras
 class TriTransformer:
     def __init__(self, i_tokens, p, o_tokens=None):
+        p.dump()
         self.i_tokens = i_tokens
-
+        self.params = p
         if o_tokens is None:
             # Autoencoder
             o_tokens = i_tokens

@@ -254,6 +254,7 @@ def main():
                                             int(
                                                 4 / args.base_lr)))  # there is a warning that it is slow, however, it's ok.
 
+        model.compile_vae(Adam(args.base_lr, 0.9, 0.98))
         # Model saver
         callbacks.append(ModelCheckpoint(MODEL_DIR + "model.h5", save_best_only=False,
                                          save_weights_only=True))
@@ -270,7 +271,7 @@ def main():
                                      write_images=True,
                                      update_freq='batch'))
 
-        if args.bottleneck != "none":
+        if args.bottleneck == "none":
             model.compile_vae(Adam(args.base_lr, 0.9, 0.98))
         else:
             # avoid exploding gradients
