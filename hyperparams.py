@@ -12,6 +12,8 @@ from molecules.model import TriTransformer
 import dataloader as dd
 from utils import WeightAnnealer_epoch
 from os import getenv
+import tensorflow as tf
+
 MODEL_ARCH = 'TRANSFORMER'
 MODEL_NAME = 'avg_model'
 MODEL_DIR = 'models/'
@@ -87,8 +89,11 @@ def create_model(x_train, y_train, x_test, y_test):
     # GET TOKENS
     d_file = 'data/zinc_100k.txt'
     tokens = dd.MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
-    model = TriTransformer(tokens, p=params)
-
+    if N_GPUS > 1:
+        with tf.device("/cpu:0"):
+            model = TriTransformer(tokens, p=params)
+    else:
+        model = TriTransformer(tokens, p=params)
     cb = []
     cb.append(LRSchedulerPerStep(params.get("d_model"), warmup=int(warmup)))
 
@@ -102,7 +107,7 @@ def create_model(x_train, y_train, x_test, y_test):
         from keras.utils.training_utils import multi_gpu_model
         model.autoencoder = multi_gpu_model(model.autoencoder, N_GPUS)
 
-    result = model.autoencoder.fit(x_train, None, batch_size=25*N_GPUS,
+    result = model.autoencoder.fit(x_train, None, batch_size=50*N_GPUS,
                                    epochs=3,
                                    validation_data=(x_test, None),
                                    callbacks=cb)
