@@ -10,6 +10,7 @@ from molecules.transformer import LRSchedulerPerStep
 from hyperas.distributions import quniform, choice
 from molecules.model import TriTransformer
 import dataloader as dd
+from utils import WeightAnnealer_epoch
 
 MODEL_ARCH = 'TRANSFORMER'
 MODEL_NAME = 'avg_model'
@@ -64,15 +65,14 @@ def create_model(x_train, y_train, x_test, y_test):
     layers = {{quniform(1, 7, 1)}}
     warmup = {{quniform(6000, 20000, 100)}}
 
-
     params.set("d_model", int(d_model))
     params.set("d_inner_hid", int(d_inner_hid))
-    params.set("d_k",int(d_k))
+    params.set("d_k", int(d_k))
     params.set("layers", int(layers))
 
     # Automatically set params from above
     params.set("d_v", params.get("d_k"))
-    params.set("heads", int(np.ceil(d_model/d_k)))
+    params.set("heads", int(np.ceil(d_model / d_k)))
 
     params.setIDparams()
     # GET TOKENS
@@ -80,15 +80,20 @@ def create_model(x_train, y_train, x_test, y_test):
     tokens = dd.MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
     model = TriTransformer(tokens, p=params)
 
-    cb = LRSchedulerPerStep(params.get("d_model"),
-                            warmup=int(warmup))
+    cb = []
+    cb.append(LRSchedulerPerStep(params.get("d_model"), warmup=int(warmup)))
+
+    cb.append(WeightAnnealer_epoch(model.kl_loss_var,
+                                   anneal_epochs=params.get("kl_anneal_epochs"),
+                                   max_val=params.get("kl_max_weight"),
+                                   init_epochs=params.get("kl_pretrain_epochs")))
 
     model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
 
     result = model.autoencoder.fit(x_train, None, batch_size=25,
                                    epochs=3,
                                    validation_data=(x_test, None),
-                                   callbacks=[cb])
+                                   callbacks=cb)
 
     # get the highest validation accuracy of the training epochs
     validation_acc = np.amax(result.history['val_accu'])
