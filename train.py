@@ -11,6 +11,7 @@ from os.path import exists
 from os import mkdir, remove
 import tensorflow as tf
 from keras import backend as k
+from keras.utils.training_utils import multi_gpu_model
 
 from utils import epoch_track, WeightAnnealer_epoch, load_dataset
 
@@ -167,6 +168,15 @@ def main():
             validation_data=(data_test, data_test)
         )
     else:
+
+        # GET NUMBER OF AVAILABLE GPUS
+        CUDA_VISIBLE_DEVICES = os.getenv('CUDA_VISIBLE_DEVICES')
+        if CUDA_VISIBLE_DEVICES is None:
+            N_GPUS = 1
+        else:
+            N_GPUS = len(CUDA_VISIBLE_DEVICES.split(","))
+
+        print("Found {} GPUs".format(N_GPUS))
         print("Making smiles dict")
 
         # Get default attention parameters
@@ -302,6 +312,8 @@ def main():
                 if exists(MODEL_DIR + "latents.h5"):
                     remove(MODEL_DIR + "latents.h5")
 
+                if N_GPUS > 1:
+                    model.autoencoder = multi_gpu_model(model, gpus=N_GPUS)
                 if args.gen and params.get("pp_weight") == 0.0:
                     print("Using generator for data!")
                     model.autoencoder.fit_generator(gen.train_data, None,
@@ -316,64 +328,11 @@ def main():
                         train = [data_train, props_train]
                         test = [data_test, props_test]
                     print("Not using generator for data.")
-                    model.autoencoder.fit(train, None, batch_size=args.batch_size,
+                    model.autoencoder.fit(train, None, batch_size=args.batch_size*N_GPUS,
                                           epochs=args.epochs, initial_epoch=current_epoch - 1,
                                           validation_data=(test, None),
                                           callbacks=callbacks)
 
-            if params.get("bottleneck") != "nppe":
-                print("Autoencoder training complete. Loading best model.")
-                model.autoencoder.load_weights(MODEL_DIR + "best_model.h5")
-
-                # Try to load property training data
-                if not exists(MODEL_DIR + "latents.h5"):
-                    print("Generating latent representations from auto-encoder for property predictor training.")
-                    data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
-                                                                                       h5_file=d_file.replace('.txt',
-                                                                                                              '_data.h5'))
-                    z_train = model.output_latent.predict([data_train], 64)
-                    z_test = model.output_latent.predict([data_test], 64)
-
-                    with h5py.File(MODEL_DIR + "latents.h5", 'w') as dfile:
-                        dfile.create_dataset('z_test', data=z_test)
-                        dfile.create_dataset('z_train', data=z_train)
-
-                else:
-                    print("Loading previously generated latent representations for property predictor training.")
-                    with h5py.File(MODEL_DIR + "latents.h5") as dfile:
-                        z_test, z_train = dfile['z_test'][:], dfile['z_train'][:]
-
-                # Strange hack for dimensionality
-                props_test = np.expand_dims(props_test, 3)
-                props_train = np.expand_dims(props_train, 3)
-                model.property_predictor.compile(optimizer='adam',
-                                                 loss='mean_squared_error')
-                # Model saver
-                model_saver = ModelCheckpoint(MODEL_DIR + "pp_model.h5", save_best_only=False,
-                                              save_weights_only=True)
-
-                best_model_saver = ModelCheckpoint(MODEL_DIR + "best_pp_model.h5", save_best_only=True,
-                                                   save_weights_only=True)
-
-                # Load in property predictor weights
-                try:
-                    model.property_predictor.load_weights(MODEL_DIR + "pp_model.h5", by_name=True)
-                except:
-                    pass
-
-                print("Training property predictor")
-                model.property_predictor.fit(z_train, props_train,
-                                             batch_size=params.get("batch_size"), epochs=params.get("pp_epochs"),
-                                             initial_epoch=params.get("current_epoch") - 1,
-                                             validation_data=(z_test, props_test),
-                                             callbacks=[model_saver, best_model_saver, tbCallback, ep_track])
-
-                try:
-                    model.property_predictor.load_weights(MODEL_DIR + "best_pp_model.h5", by_name=True)
-                except:
-                    pass
-            else:
-                print("No bottleneck, so cannot train property prediction model")
         except KeyboardInterrupt:
             # print("Interrupted on epoch {}".format(ep_track.epoch()))
             print("Training interrupted.")

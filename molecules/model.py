@@ -10,10 +10,8 @@ from keras.layers.core import Dense, Activation, Flatten, RepeatVector
 from keras.layers.wrappers import TimeDistributed
 from keras.layers.recurrent import GRU
 from keras.layers.convolutional import Convolution1D
-from dataloader import AttnParams
 import molecules.transformer as tr
 from molecules.transformer import debugPrint, SUM_AM
-
 
 # import transformer as tr
 
