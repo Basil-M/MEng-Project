@@ -12,7 +12,7 @@ from keras.layers.recurrent import GRU
 from keras.layers.convolutional import Convolution1D
 import molecules.transformer as tr
 from molecules.transformer import debugPrint, SUM_AM
-
+from keras.utils.training_utils import multi_gpu_model
 # import transformer as tr
 
 
@@ -105,7 +105,6 @@ class MoleculeVAE():
 # https://github.com/Lsdefine/attention-is-all-you-need-keras
 class TriTransformer:
     def __init__(self, i_tokens, p, o_tokens=None):
-        p.dump()
         self.i_tokens = i_tokens
         self.params = p
         if o_tokens is None:
@@ -197,7 +196,7 @@ class TriTransformer:
         pos = K.cumsum(K.ones_like(x, 'int32'), 1)
         return pos * mask
 
-    def compile_vae(self, optimizer='adam', active_layers=999):
+    def compile_vae(self, optimizer='adam', active_layers=999, N_GPUS=1):
         src_seq_input = Input(shape=(None,), dtype='int32', name='src_seq_input')
         tgt_seq_input = src_seq_input  # Input(shape=(None,), dtype='int32', name='tgt_seq_input')
 
@@ -344,6 +343,8 @@ class TriTransformer:
         # For getting attentions
         attn_list = enc_attn + dec_attn + encdec_attn
         self.output_attns = Model(src_seq_input, attn_list)
+        if N_GPUS != 1:
+            self.autoencoder = multi_gpu_model(self.autoencoder, N_GPUS)
         self.autoencoder.compile(optimizer, None)
         self.autoencoder.metrics_names.append('ppl')
         self.autoencoder.metrics_tensors.append(self.ppl)
@@ -371,6 +372,8 @@ class TriTransformer:
         self.decode_model = Model([z_input, tgt_seq_input], final_output[0])
         self.encode_model.compile('adam', 'mse')
         self.decode_model.compile('adam', 'mse')
+
+
 
     def make_src_seq_matrix(self, input_seq):
         '''

@@ -89,11 +89,7 @@ def create_model(x_train, y_train, x_test, y_test):
     # GET TOKENS
     d_file = 'data/zinc_100k.txt'
     tokens = dd.MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
-    if N_GPUS > 1:
-        with tf.device("/cpu:0"):
-            model = TriTransformer(tokens, p=params)
-    else:
-        model = TriTransformer(tokens, p=params)
+
     cb = []
     cb.append(LRSchedulerPerStep(params.get("d_model"), warmup=int(warmup)))
 
@@ -102,10 +98,17 @@ def create_model(x_train, y_train, x_test, y_test):
                                    max_val=params.get("kl_max_weight"),
                                    init_epochs=params.get("kl_pretrain_epochs")))
 
-    model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
-    if N_GPUS > 1:
-        from keras.utils.training_utils import multi_gpu_model
-        model.autoencoder = multi_gpu_model(model.autoencoder, N_GPUS)
+    # Set up model
+    if N_GPUS == 1:
+        model = TriTransformer(tokens, params)
+    else:
+        # Want to set model up in the CPU
+        with tf.device("/cpu:0"):
+            model = TriTransformer(tokens, params)
+
+    model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5), N_GPUS=N_GPUS)
+
+
 
     result = model.autoencoder.fit(x_train, None, batch_size=50*N_GPUS,
                                    epochs=3,

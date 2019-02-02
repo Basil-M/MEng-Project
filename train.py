@@ -11,7 +11,7 @@ from os.path import exists
 from os import mkdir, remove
 import tensorflow as tf
 from keras import backend as k
-from keras.utils.training_utils import multi_gpu_model
+
 
 from utils import epoch_track, WeightAnnealer_epoch, load_dataset
 
@@ -256,15 +256,19 @@ def main():
         from molecules.model import TriTransformer as model_arch
 
         # Set up model
-        model = model_arch(tokens, params)
-
+        if N_GPUS == 1:
+            model = model_arch(tokens, params)
+        else:
+            # Want to set model up in the CPU
+            with tf.device("/cpu:0"):
+                model = model_arch(tokens, params)
         # Learning rate scheduler
         callbacks = []
         callbacks.append(LRSchedulerPerStep(params.get("d_model"),
                                             int(
                                                 4 / args.base_lr)))  # there is a warning that it is slow, however, it's ok.
 
-        model.compile_vae(Adam(args.base_lr, 0.9, 0.98))
+
         # Model saver
         callbacks.append(ModelCheckpoint(MODEL_DIR + "model.h5", save_best_only=False,
                                          save_weights_only=True))
@@ -282,10 +286,10 @@ def main():
                                      update_freq='batch'))
 
         if args.bottleneck == "none":
-            model.compile_vae(Adam(args.base_lr, 0.9, 0.98))
+            model.compile_vae(Adam(args.base_lr, 0.9, 0.98), N_GPUS=N_GPUS)
         else:
             # avoid exploding gradients
-            model.compile_vae(Adam(args.base_lr, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
+            model.compile_vae(Adam(args.base_lr, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5), N_GPUS=N_GPUS)
 
         try:
             model.autoencoder.load_weights(MODEL_DIR + "model.h5")
@@ -312,8 +316,6 @@ def main():
                 if exists(MODEL_DIR + "latents.h5"):
                     remove(MODEL_DIR + "latents.h5")
 
-                if N_GPUS > 1:
-                    model.autoencoder = multi_gpu_model(model, gpus=N_GPUS)
                 if args.gen and params.get("pp_weight") == 0.0:
                     print("Using generator for data!")
                     model.autoencoder.fit_generator(gen.train_data, None,
