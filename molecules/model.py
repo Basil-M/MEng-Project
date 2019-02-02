@@ -13,6 +13,8 @@ from keras.layers.convolutional import Convolution1D
 import molecules.transformer as tr
 from molecules.transformer import debugPrint, SUM_AM
 from keras.utils.training_utils import multi_gpu_model
+
+
 # import transformer as tr
 
 
@@ -106,90 +108,80 @@ class MoleculeVAE():
 class TriTransformer:
     def __init__(self, i_tokens, p, o_tokens=None):
         self.i_tokens = i_tokens
-        self.params = p
+        # self.params = p
+        self.p = lambda param: p.get(param)
+
         if o_tokens is None:
             # Autoencoder
             o_tokens = i_tokens
 
         self.o_tokens = o_tokens
-        self.len_limit = p.get("len_limit")
         self.src_loc_info = True
-        self.d_model = p.get("d_model")
         self.decode_model = None
-        self.bottleneck = p.get("bottleneck")
-        self.stddev = p.get("stddev")
 
-        if self.bottleneck == "none":
-            p.set("latent_dim", None)
-            self.latent_dim = None
-        elif p.get("latent_dim") is None:
-            self.latent_dim = p.get("d_model")
-        else:
-            self.latent_dim = p.get("latent_dim")
+        self.pp_layers = self.p("pp_layers")
+        d_emb = self.p("d_model")
 
-        self.pp_layers = p.get("pp_layers")
-        d_emb = self.d_model
-
-        pos_emb = tr.Embedding(self.len_limit, d_emb, trainable=False,
-                               weights=[tr.GetPosEncodingMatrix(self.len_limit, d_emb)])
+        pos_emb = tr.Embedding(self.p("len_limit"), d_emb, trainable=False,
+                               weights=[tr.GetPosEncodingMatrix(self.p("len_limit"), d_emb)])
         i_word_emb = tr.Embedding(i_tokens.num(), d_emb)
         o_word_emb = i_word_emb
 
-        self.encoder = tr.VariationalEncoder(self.d_model, p.get("d_inner_hid"), p.get("heads"), p.get("d_k"),
-                                             p.get("d_v"),
-                                             p.get("layers"), p.get("dropout"), word_emb=i_word_emb, pos_emb=pos_emb)
+        self.encoder = tr.VariationalEncoder(self.p("d_model"), self.p("d_inner_hid"), self.p("heads"), self.p("d_k"),
+                                             self.p("d_v"),
+                                             self.p("layers"), self.p("dropout"), word_emb=i_word_emb, pos_emb=pos_emb)
 
         # self.false_embedder = tr.FalseEmbeddings(d_emb=self.d_model)
-        self.false_embedder = tr.FalseEmbeddingsNonTD(d_emb=self.d_model, d_latent=p.get("latent_dim"))
+        self.false_embedder = tr.FalseEmbeddingsNonTD(d_emb=self.p("d_model"), d_latent=self.p("latent_dim"))
 
-        if p.get("bottleneck") == "average":
-            self.encoder_to_latent = tr.AvgLatent(p.get("d_model"), p.get("latent_dim"))
-        elif p.get("bottleneck") == "interim_decoder":
-            latent_pos_emb = tr.Embedding(p.get("latent_dim"), p.get("ID_d_model"), trainable=False)
-            self.encoder_to_latent = tr.InterimDecoder2(p.get("ID_d_model"), p.get("ID_d_inner_hid"),
-                                                        p.get("ID_heads"), p.get("ID_d_k"), p.get("ID_d_v"),
-                                                        p.get("ID_layers"), p.get("ID_width"), p.get("dropout"),
-                                                        stddev=p.get("stddev"),
-                                                        latent_dim=p.get("latent_dim"),
+        if self.p("bottleneck") == "average":
+            self.encoder_to_latent = tr.AvgLatent(self.p("d_model"), self.p("latent_dim"))
+        elif self.p("bottleneck") == "interim_decoder":
+            latent_pos_emb = tr.Embedding(self.p("latent_dim"), self.p("ID_d_model"), trainable=False)
+            self.encoder_to_latent = tr.InterimDecoder2(self.p("ID_d_model"), self.p("ID_d_inner_hid"),
+                                                        self.p("ID_heads"), self.p("ID_d_k"), self.p("ID_d_v"),
+                                                        self.p("ID_layers"), self.p("ID_width"), self.p("dropout"),
+                                                        stddev=self.p("stddev"),
+                                                        latent_dim=self.p("latent_dim"),
                                                         pos_emb=latent_pos_emb,
                                                         false_emb=None)
 
-        elif p.get("bottleneck") == "none":
-            self.encoder_to_latent = tr.Vec2Variational(p.get("d_model"), self.len_limit)
+        elif self.p("bottleneck") == "none":
+            self.encoder_to_latent = tr.Vec2Variational(self.p("d_model"), self.len_limit)
 
         # Sample from latent space
         def sampling(args):
             z_mean_, z_logvar_ = args
-            if self.stddev is None or self.stddev == 0:
+            if self.p("stddev") is None or self.p("stddev") == 0:
                 return z_mean_
             else:
-                if p.get("bottleneck") == "none":
-                    latent_shape = (K.shape(z_mean_)[0], K.shape(z_mean_)[1], p.get("d_model"))
+                if self.p("bottleneck") == "none":
+                    latent_shape = (K.shape(z_mean_)[0], K.shape(z_mean_)[1], self.p("d_model"))
                 else:
-                    latent_shape = (K.shape(z_mean_)[0], p.get("latent_dim"))
+                    latent_shape = (K.shape(z_mean_)[0], self.p("latent_dim"))
 
-                epsilon = K.random_normal(shape=latent_shape, mean=0., stddev=self.stddev)
+                epsilon = K.random_normal(shape=latent_shape, mean=0., stddev=self.p("stddev"))
                 return z_mean_ + K.exp(z_logvar_ / 2) * epsilon
 
         self.sampler = Lambda(sampling)
-        self.decoder = tr.DecoderFromLatent(self.d_model, p.get("d_inner_hid"), p.get("heads"), p.get("d_k"),
-                                            p.get("d_v"),
-                                            p.get("layers"), p.get("dropout"),
+        self.decoder = tr.DecoderFromLatent(self.p("d_model"), self.p("d_inner_hid"), self.p("heads"), self.p("d_k"),
+                                            self.p("d_v"),
+                                            self.p("layers"), self.p("dropout"),
                                             word_emb=o_word_emb, pos_emb=pos_emb)
         self.target_layer = TimeDistributed(Dense(o_tokens.num(), use_bias=False))
         # self.target_softmax = Softmax()
 
-        if self.stddev == 0 or self.stddev is None:
+        if self.p("stddev") == 0 or self.p("stddev") is None:
             self.kl_loss_var = None
         else:
             self.kl_loss_var = K.variable(0.0, dtype=np.float, name='kl_loss_weight')
 
-        if p.get("pp_weight") == 0 or p.get("pp_weight") is None:
+        if self.p("pp_weight") == 0 or self.p("pp_weight") is None:
             self.pp_loss_var = None
             print("Not joint training property encoder")
         else:
-            self.pp_loss_var = K.variable(p.get("pp_weight"), dtype=np.float, name='pp_loss_weight')
-            print("Joint training property encoder with PP weight {}".format(p.get("pp_weight")))
+            self.pp_loss_var = K.variable(self.p("pp_weight"), dtype=np.float, name='pp_loss_weight')
+            print("Joint training property encoder with PP weight {}".format(self.p("pp_weight")))
 
     def get_pos_seq(self, x):
         mask = K.cast(K.not_equal(x, 0), 'int32')
@@ -197,135 +189,150 @@ class TriTransformer:
         return pos * mask
 
     def compile_vae(self, optimizer='adam', active_layers=999, N_GPUS=1):
-        src_seq_input = Input(shape=(None,), dtype='int32', name='src_seq_input')
-        tgt_seq_input = src_seq_input  # Input(shape=(None,), dtype='int32', name='tgt_seq_input')
-
-        src_seq = src_seq_input
-
-        # pr = Lambda(lambda x: tf.Print(x, [x], "\nSRC_SEQ: ", summarize=SUM_AM))
-        src_seq = debugPrint(src_seq, "SRC_SEQ")
-        # pr = Lambda(lambda x: tf.Print(x, [x], "\nTGT_SEQ: ", summarize=SUM_AM))
-        tgt_seq = Lambda(lambda x: x[:, :-1])(tgt_seq_input)
-        tgt_seq = debugPrint(tgt_seq, "TGT_SEQ")
-        # tgt_seq = pr(tgt_seq)
-        tgt_true = Lambda(lambda x: x[:, 1:])(tgt_seq_input)
-
-        src_pos = Lambda(self.get_pos_seq)(src_seq)
-        src_pos = debugPrint(src_pos, "SRC_POS")
-
-        tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
-        if not self.src_loc_info: src_pos = None
-
-        enc_output, enc_attn = self.encoder(src_seq,
-                                            src_pos,
-                                            active_layers=active_layers,
-                                            return_att=True)
-
-        enc_output = debugPrint(enc_output, "ENC_OUTPUT")
-
-        if self.bottleneck == "interim_decoder":
-            z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
+        if N_GPUS == 1:
+            dev = '/cpu:0'
         else:
-            z_mean, z_logvar = self.encoder_to_latent(enc_output)
+            dev = '/gpu:0'
+        with tf.device(dev):
+            src_seq_input = Input(shape=(None,), dtype='int32', name='src_seq_input')
+            tgt_seq_input = src_seq_input  # Input(shape=(None,), dtype='int32', name='tgt_seq_input')
 
-        # sample from z_mean, z_logvar
-        z_sampled = self.sampler([z_mean, z_logvar])
-        if self.bottleneck == "none":
-            z_input = Input(shape=(None, self.d_model), dtype='float32', name='z_input')
-        else:
-            z_input = Input(shape=(self.latent_dim,), dtype='float32', name='z_input')
+            src_seq = src_seq_input
 
-        # must calculate for both a latent input and the full end-to-end system
-        final_output = []
-        for l_vec in [z_input, z_sampled]:
-            # 'false embed' for decoder
-            dec_input = self.false_embedder(l_vec)
+            # pr = Lambda(lambda x: tf.Print(x, [x], "\nSRC_SEQ: ", summarize=SUM_AM))
+            src_seq = debugPrint(src_seq, "SRC_SEQ")
+            # pr = Lambda(lambda x: tf.Print(x, [x], "\nTGT_SEQ: ", summarize=SUM_AM))
+            tgt_seq = Lambda(lambda x: x[:, :-1])(tgt_seq_input)
+            tgt_seq = debugPrint(tgt_seq, "TGT_SEQ")
+            # tgt_seq = pr(tgt_seq)
+            tgt_true = Lambda(lambda x: x[:, 1:])(tgt_seq_input)
 
-            dec_input = debugPrint(dec_input, "DEC_INPUT (Embedded sampled z)")
+            src_pos = Lambda(self.get_pos_seq)(src_seq)
+            src_pos = debugPrint(src_pos, "SRC_POS")
 
-            dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq,
-                                                             tgt_pos,
-                                                             l_vec,
-                                                             dec_input,
-                                                             active_layers=active_layers,
-                                                             return_att=True)
+            tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
+            if not self.src_loc_info: src_pos = None
 
-            dec_output = debugPrint(dec_output, "DEC_OUTPUT")
-            final_output.append(self.target_layer(dec_output))
-            # final_output = Softmax()(final_output)
-            # final_output[-1] = debugPrint(final_output[-1], "FINAL_OUTPUT")
+            enc_output, enc_attn = self.encoder(src_seq,
+                                                src_pos,
+                                                active_layers=active_layers,
+                                                return_att=True)
 
-        # Property prediction
-        if self.latent_dim is None:
-            latent_dim = self.d_model * self.len_limit
-            latent_vec = Input(shape=[self.d_model, self.len_limit], dtype='float', name='latent_rep')
-        else:
-            latent_dim = self.latent_dim
-            latent_vec = Input(shape=[latent_dim], dtype='float', name='latent_rep')
+            enc_output = debugPrint(enc_output, "ENC_OUTPUT")
 
-        if self.pp_loss_var is not None:
-            # latent_vec = Lambda(lambda x: K.reshape(x, [-1, latent_dim]))(z_sampled)
-            latent_vec = z_sampled
+            if self.p("bottleneck") == "interim_decoder":
+                z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
+            else:
+                z_mean, z_logvar = self.encoder_to_latent(enc_output)
 
-        h = Dense(latent_dim, input_shape=(latent_dim,), activation='linear')(latent_vec)
-        num_props = 4
-        prop_input = Input(shape=[num_props])
-        for _ in range(self.pp_layers - 1):
-            h = Dense(latent_dim, activation='linear')(h)
-        prop_output = Dense(num_props, activation='linear')(h)
+            # sample from z_mean, z_logvar
+            z_sampled = self.sampler([z_mean, z_logvar])
+            if self.p("bottleneck") == "none":
+                z_input = Input(shape=(None, self.p("d_model")), dtype='float32', name='z_input')
+            else:
+                z_input = Input(shape=(self.p("latent_dim"),), dtype='float32', name='z_input')
 
-        # RECONSTRUCTION LOSS
-        def rec_loss(args):
-            y_pred, y_true = args
-            y_true = tf.cast(y_true, 'int32')
-            loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true, logits=y_pred)
-            mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
-            loss = tf.reduce_sum(loss * mask, -1) / tf.reduce_sum(mask, -1)
-            return K.mean(loss)
+            # must calculate for both a latent input and the full end-to-end system
+            final_output = []
+            for l_vec in [z_input, z_sampled]:
+                # 'false embed' for decoder
+                dec_input = self.false_embedder(l_vec)
 
-        # KL DIVERGENCE LOSS
-        def kl_loss(args):
-            z_mean_, z_log_var_ = args
+                dec_input = debugPrint(dec_input, "DEC_INPUT (Embedded sampled z)")
 
-            return - 0.5 * self.kl_loss_var * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_),
-                                                             name='KL_loss_sum')
-        def kl_loss2(args):
-            mean_, logvar_, z_ = args
-            kl_loss = -K.square(z_) - K.square(z_ - mean_)/K.exp(logvar_) - logvar_
-            kl_loss = -0.5*K.sum(kl_loss, axis=1)
-            return self.kl_loss_var*K.sum(kl_loss, axis=0)
+                dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq,
+                                                                 tgt_pos,
+                                                                 l_vec,
+                                                                 dec_input,
+                                                                 active_layers=active_layers,
+                                                                 return_att=True)
 
-        # PROPERTY PREDICTION LOSS
-        def pp_loss(args):
-            prop_input_, prop_output_ = args
-            SE = K.pow(prop_input_ - prop_output_, 2)
-            SE = K.sqrt(SE)
-            return self.pp_loss_var * tf.reduce_mean(SE)# / K.shape(prop_output)[0]
+                dec_output = debugPrint(dec_output, "DEC_OUTPUT")
+                final_output.append(self.target_layer(dec_output))
+                # final_output = Softmax()(final_output)
+                # final_output[-1] = debugPrint(final_output[-1], "FINAL_OUTPUT")
 
-        def get_accu(args):
-            y_pred, y_true = args
-            mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
-            corr = K.cast(K.equal(K.cast(y_true, 'int32'), K.cast(K.argmax(y_pred, axis=-1), 'int32')), 'float32')
-            corr = K.sum(corr * mask, -1) / K.sum(mask, -1)
-            return K.mean(corr)
+            # Property prediction
+            if self.p("latent_dim") is None:
+                latent_dim = self.p("d_model") * self.p("len_limit")
+                latent_vec = Input(shape=(self.p("d_model"), self.p("len_limit"),), dtype='float', name='latent_rep')
+            else:
+                latent_dim = self.p("latent_dim")
+                latent_vec = Input(shape=[latent_dim], dtype='float', name='latent_rep')
 
-        losses = []
-        losses.append(Lambda(rec_loss, name='ReconstructionLoss')([final_output[1], tgt_true]))
+            if self.pp_loss_var is not None:
+                # latent_vec = Lambda(lambda x: K.reshape(x, [-1, latent_dim]))(z_sampled)
+                latent_vec = z_sampled
 
-        kl = None
-        if self.kl_loss_var is not None:
-            kl = Lambda(kl_loss, name='VariationalLoss')([z_mean, z_logvar])
-            # kl = Lambda(kl_loss2, name='VariationalLoss')([z_mean, z_logvar, z_sampled])
-            losses.append(kl)
+            h = Dense(latent_dim, input_shape=(latent_dim,), activation='linear')(latent_vec)
+            num_props = 4
+            prop_input = Input(shape=[num_props])
+            for _ in range(self.p("pp_layers") - 1):
+                h = Dense(latent_dim, activation='linear')(h)
+            prop_output = Dense(num_props, activation='linear')(h)
 
-        pp = None
+            # RECONSTRUCTION LOSS
+            def rec_loss(args):
+                y_pred, y_true = args
+                y_true = tf.cast(y_true, 'int32')
+                loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true, logits=y_pred)
+                mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
+                loss = tf.reduce_sum(loss * mask, -1) / tf.reduce_sum(mask, -1)
+                return K.mean(loss)
 
-        if self.pp_loss_var is not None:
-            pp = Lambda(pp_loss, name='PropertyLoss')([prop_input, prop_output])
-            losses.append(pp)
+            # KL DIVERGENCE LOSS
+            def kl_loss(args):
+                z_mean_, z_log_var_ = args
 
-        loss = Lambda(tf.reduce_sum)(losses)
-        # loss = Lambda(get_loss, name='LossFn')([final_output, tgt_true, z_mean, z_logvar])
+                return - 0.5 * self.kl_loss_var * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_),
+                                                                 name='KL_loss_sum')
+
+
+
+            # PROPERTY PREDICTION LOSS
+            def pp_loss(args):
+                prop_input_, prop_output_ = args
+                SE = K.pow(prop_input_ - prop_output_, 2)
+                SE = K.sqrt(SE)
+                return self.pp_loss_var * tf.reduce_mean(SE)  # / K.shape(prop_output)[0]
+
+            def get_accu(args):
+                y_pred, y_true = args
+                mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
+                corr = K.cast(K.equal(K.cast(y_true, 'int32'), K.cast(K.argmax(y_pred, axis=-1), 'int32')), 'float32')
+                corr = K.sum(corr * mask, -1) / K.sum(mask, -1)
+                return K.mean(corr)
+
+            losses = []
+            losses.append(Lambda(rec_loss, name='ReconstructionLoss')([final_output[1], tgt_true]))
+
+            kl = None
+
+            # MMD penality
+
+
+            # WAE_loss = lambda x: self.kl_loss_var * self.wae_mmd(x[0], x[1])
+            # WAE_loss = lambda x: self.mmd_penalty(x[0], x[1], kernel='RBF')
+            if self.kl_loss_var is not None:
+
+                if self.p("RBF_s") == 0:
+                    print("Using variational autoencoder")
+                    kl = Lambda(kl_loss, name='VariationalLoss')([z_mean, z_logvar])
+                else:
+                    print("Using Wasserstein autoencoder, with RBF kernel (s = {})".format(self.p("RBF_s")))
+                    kl = Lambda(self.wae_mmd, name='VariationalLoss')(z_sampled)
+                kl = Lambda(self.mmd_penalty, name='VariationalLoss')(z_sampled)
+                # kl = Lambda(kl_loss2, name='VariationalLoss')([z_mean, z_logvar, z_sampled])
+                losses.append(kl)
+
+            pp = None
+
+            if self.pp_loss_var is not None:
+                pp = Lambda(pp_loss, name='PropertyLoss')([prop_input, prop_output])
+                losses.append(pp)
+
+            loss = Lambda(tf.reduce_sum, name='LossesSum')(losses)
+            # loss = Lambda(get_loss, name='LossFn')([final_output, tgt_true, z_mean, z_logvar])
 
         self.ppl = Lambda(K.exp)(loss)
         self.accu = Lambda(get_accu)([final_output[1], tgt_true])
@@ -343,8 +350,10 @@ class TriTransformer:
         # For getting attentions
         attn_list = enc_attn + dec_attn + encdec_attn
         self.output_attns = Model(src_seq_input, attn_list)
+
         if N_GPUS != 1:
             self.autoencoder = multi_gpu_model(self.autoencoder, N_GPUS)
+
         self.autoencoder.compile(optimizer, None)
         self.autoencoder.metrics_names.append('ppl')
         self.autoencoder.metrics_tensors.append(self.ppl)
@@ -372,8 +381,6 @@ class TriTransformer:
         self.decode_model = Model([z_input, tgt_seq_input], final_output[0])
         self.encode_model.compile('adam', 'mse')
         self.decode_model.compile('adam', 'mse')
-
-
 
     def make_src_seq_matrix(self, input_seq):
         '''
@@ -476,3 +483,157 @@ class TriTransformer:
         final_results.sort(key=lambda x: x[-1], reverse=True)
         final_results = [(delimiter.join(x), y) for x, y in final_results]
         return final_results
+
+    def wae_mmd(self, sample_qz):
+        sample_pz = K.random_normal(shape=[self.p("batch_size"), self.p("latent_dim")], mean=0.0, stddev=self.p("stddev"),
+                                  dtype=tf.float32)
+
+        s = 10
+        # batch size
+        n = int(self.p("batch_size"))
+
+        ind = np.linspace(0, n - 1, n)
+        ind = np.array([i + n * ind for i in ind]).flatten().astype(dtype=np.int)
+        ind = np.expand_dims(ind, axis=1)
+
+        def K_MAT2(A, B):
+            # A = K.reshape(A, [n, self.p("latent_dim")])  # give tensorflow shape hints
+            A = K.tile(A, [n, 1])
+            B = K.tile(B, [n, 1])
+
+            # indices to reshuffle A
+            A = tf.gather_nd(A, indices=ind)
+            # A = A[ind, :]
+            # A should now be a matrix whose rows are [z1, ..., z1, z2, ..., z2...] etc
+            distances = K.sqrt(K.sum(K.square(A - B), axis=1))
+            distances = debugPrint(distances, "DISTANCES: ")
+            # Returns a vector of n^2 distances
+            # mat = tf.matmul(A - B, K.transpose(A - B))
+
+            return K.exp((-0.5/ s ** 2) * distances)
+
+        def K_MAT(A, B):
+            '''
+
+            :param A: Matrix of size [n, D] - each row vector is sample
+            :param B: Matrix of size [n, D] - each row vector is a sample
+            :return: Matrix of size [n, n] - each entry (i,j) is k(a_i,b_j), where
+            a_i is the i'th row of A and b_j is the j'th row of B
+            '''
+            # A = K.transpose(A)
+            B = K.transpose(B)
+            k_vecs = []
+            for i in range(n):
+                a_i = K.expand_dims(A[i, :])  # i'th row of first matrix
+                Ai = K.tile(a_i, [1, n])  # n copies - size [D, n]
+
+                # Will be a row vector of distances
+                # Element j of dists_i = ||ai - bj||
+                dists_i = K.sum(K.square(Ai - B), axis=0)
+                dists_i = debugPrint(dists_i, "DIST {}".format(i))
+                k_vec = K.exp((-1 / s ** 2) * dists_i)
+                k_vecs.append(K.expand_dims(k_vec))
+
+            k_mat = K.concatenate(k_vecs, axis=1)
+
+            return K.transpose(k_mat)
+
+        # k = lambda z1, z2: K.exp(-K.sum(K.square(z1 - z2), axis=1) / (s ** 2))
+
+        ## First term
+        ## 1/n(n+1) sum k(zp_l, zp_j) for all l=/=j
+
+        ## Second term
+        ## 1/n(n+1) sum k(zq_l, zq_j) for all l=/=j
+
+        # Set diagonals to zero
+        MMD = []
+        for samples in [sample_qz, sample_pz]:
+            K_sum = tf.reduce_sum(K_MAT(samples, samples)) - n
+
+            K_sum = debugPrint(K_sum, "K_SUM: ")
+            # there will be n diagonals in this matrix equal to 1
+            # these shouldn't be included in the sum anyway
+            # so simply subtract n after reduce_sum
+            MMD.append(K_sum / (n * n + n))
+
+        # Final term
+        # -2/n * sum k(zp_l, zq_j) for all l, j
+        MMD.append(-2 * tf.reduce_sum(K_MAT(sample_pz, sample_qz)) / n ** 2)
+
+        return self.kl_loss_var*tf.reduce_sum(MMD)
+
+    def mmd_penalty(self, sample_qz):
+        '''
+
+        :param stddev:
+        :param kernel: RBF or IMQ
+        :param pz: for IMQ kernel: 'normal', 'sphere' or 'uniform'
+        :param sample_qz:
+        :param sample_pz:
+        :return:
+        '''
+        kernel='RBF'
+        sample_pz = K.random_normal(shape=[self.p("batch_size"), self.p("latent_dim")], mean=0.0,
+                                    stddev=self.p("stddev"),
+                                    dtype=tf.float32)
+        sigma2_p = self.p("RBF_s") ** 2
+        n = self.p("batch_size")
+        # n = tf.cast(n, tf.int32)
+        nf = float(n)  # tf.cast(n, tf.float32)
+        half_size = (n * n - n) / 2
+
+        norms_pz = tf.reduce_sum(tf.square(sample_pz), axis=1, keep_dims=True)
+        dotprods_pz = tf.matmul(sample_pz, sample_pz, transpose_b=True)
+        distances_pz = norms_pz + K.transpose(norms_pz) - 2. * dotprods_pz
+
+        norms_qz = tf.reduce_sum(tf.square(sample_qz), axis=1, keep_dims=True)
+        dotprods_qz = tf.matmul(sample_qz, sample_qz, transpose_b=True)
+        distances_qz = norms_qz + K.transpose(norms_qz) - 2. * dotprods_qz
+
+        dotprods = tf.matmul(sample_qz, sample_pz, transpose_b=True)
+        distances = norms_qz + tf.transpose(norms_pz) - 2. * dotprods
+
+        if kernel == 'RBF':
+            # Median heuristic for the sigma^2 of Gaussian kernel
+            hs = int(half_size)  # tf.cast(half_size, tf.int32)
+            # sigma2_k = K.flatten(distances) + K.flatten(distances_qz)
+            sigma2_k = tf.nn.top_k(K.flatten(distances), hs).values[hs - 1]
+            sigma2_k += tf.nn.top_k(K.flatten(distances_qz), hs).values[hs - 1]
+            # Maximal heuristic for the sigma^2 of Gaussian kernel
+            # sigma2_k = tf.nn.top_k(tf.reshape(distances_qz, [-1]), 1).values[0]
+            # sigma2_k += tf.nn.top_k(tf.reshape(distances, [-1]), 1).values[0]
+            # sigma2_k = opts['latent_space_dim'] * sigma2_p
+            distances_qz /= sigma2_k
+            distances_pz /= sigma2_k
+            distances /= sigma2_k
+            res1 = K.exp(- 0.5 * distances_qz)
+            res1 += K.exp(- 0.5 * distances_pz)
+
+            res1 = tf.multiply(res1, 1. - K.eye(n))
+            res1 = tf.reduce_sum(res1) / (nf * nf - nf)
+            res2 = K.exp(-0.5 * distances)
+            res2 = tf.reduce_sum(res2) * 2. / (nf * nf)
+            stat = res1 - res2
+        elif kernel == 'IMQ':
+            # k(x, y) = C / (C + ||x - y||^2)
+            # C = tf.nn.top_k(tf.reshape(distances, [-1]), half_size).values[half_size - 1]
+            # C += tf.nn.top_k(tf.reshape(distances_qz, [-1]), half_size).values[half_size - 1]
+
+            if pz == 'normal':
+                Cbase = 2. * self.p("latent_dim") * sigma2_p
+            elif pz == 'sphere':
+                Cbase = 2.
+            elif pz == 'uniform':
+                Cbase = self.p("latent_dim")
+            stat = 0.
+            for scale in [.1, .2, .5, 1., 2., 5., 10.]:
+                C = Cbase * scale
+                res1 = C / (C + distances_qz)
+                res1 += C / (C + distances_pz)
+                res1 = tf.multiply(res1, 1. - tf.eye(n))
+                res1 = tf.reduce_sum(res1) / (nf * nf - nf)
+                res2 = C / (C + distances)
+                res2 = tf.reduce_sum(res2) * 2. / (nf * nf)
+                stat += res1 - res2
+        return self.kl_loss_var*stat

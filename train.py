@@ -20,15 +20,15 @@ config.gpu_options.allow_growth = True
 k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 
-NUM_EPOCHS = 7
-BATCH_SIZE = 20
+NUM_EPOCHS = 20
+BATCH_SIZE = 50
 LATENT_DIM = 128
 RANDOM_SEED = 1403
-DATA = 'data/zinc_1k.txt'
+DATA = 'data/zinc_10k.txt'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'avg_model'
+MODEL_NAME = 'avg_model12'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
