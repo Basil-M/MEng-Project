@@ -151,12 +151,12 @@ def main():
         data_train, data_test, props_train, props_test = MakeSmilesData(d_file, tokens=tokens,
                                                                         h5_file=d_file.replace('.txt',
                                                                                                '_data.h5'))
-        z_train = model.encode_model.predict([data_train], 64)
+        # z_train = model.encode_model.predict([data_train], 64)
         z_test = model.encode_model.predict([data_test], 64)
 
         with h5py.File(model_dir + "latents.h5", 'w') as dfile:
             dfile.create_dataset('z_test', data=z_test)
-            dfile.create_dataset('z_train', data=z_train)
+            # dfile.create_dataset('z_train', data=z_train)
 
     print("KURTOSIS:")
     latent_distributions(model_dir + 'latents.h5')
