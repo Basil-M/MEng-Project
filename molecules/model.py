@@ -127,11 +127,17 @@ class TriTransformer:
         i_word_emb = tr.Embedding(i_tokens.num(), d_emb)
         o_word_emb = i_word_emb
 
-        self.encoder = tr.VariationalEncoder(self.p("d_model"), self.p("d_inner_hid"), self.p("heads"), self.p("d_k"),
-                                             self.p("d_v"),
-                                             self.p("layers"), self.p("dropout"), word_emb=i_word_emb, pos_emb=pos_emb)
+        self.encoder = tr.Encoder(self.p("d_model"), self.p("d_inner_hid"), self.p("heads"), self.p("d_k"),
+                                  self.p("d_v"),
+                                  self.p("layers"), self.p("dropout"), word_emb=i_word_emb, pos_emb=pos_emb)
 
         # self.false_embedder = tr.FalseEmbeddings(d_emb=self.d_model)
+        if self.p("stddev") == 0 or self.p("stddev") is None:
+            self.kl_loss_var = None
+        else:
+            self.kl_loss_var = K.variable(0.0, dtype=np.float, name='kl_loss_weight')
+            self.stddev = self.p("stddev")*self.kl_loss_var/self.p("kl_max_weight")
+
         self.false_embedder = tr.FalseEmbeddingsNonTD(d_emb=self.p("d_model"), d_latent=self.p("latent_dim"))
 
         if self.p("bottleneck") == "average":
@@ -141,13 +147,15 @@ class TriTransformer:
             self.encoder_to_latent = tr.InterimDecoder2(self.p("ID_d_model"), self.p("ID_d_inner_hid"),
                                                         self.p("ID_heads"), self.p("ID_d_k"), self.p("ID_d_v"),
                                                         self.p("ID_layers"), self.p("ID_width"), self.p("dropout"),
-                                                        stddev=self.p("stddev"),
+                                                        stddev=self.stddev,
                                                         latent_dim=self.p("latent_dim"),
                                                         pos_emb=latent_pos_emb,
                                                         false_emb=None)
 
         elif self.p("bottleneck") == "none":
-            self.encoder_to_latent = tr.Vec2Variational(self.p("d_model"), self.len_limit)
+            self.encoder_to_latent = tr.Vec2Variational(self.p("d_model"), self.p("len_limit"))
+
+
 
         # Sample from latent space
         def sampling(args):
@@ -160,7 +168,7 @@ class TriTransformer:
                 else:
                     latent_shape = (K.shape(z_mean_)[0], self.p("latent_dim"))
 
-                epsilon = K.random_normal(shape=latent_shape, mean=0., stddev=self.p("stddev"))
+                epsilon = K.random_normal(shape=latent_shape, mean=0., stddev=self.stddev)
                 return z_mean_ + K.exp(z_logvar_ / 2) * epsilon
 
         self.sampler = Lambda(sampling)
@@ -171,10 +179,6 @@ class TriTransformer:
         self.target_layer = TimeDistributed(Dense(o_tokens.num(), use_bias=False))
         # self.target_softmax = Softmax()
 
-        if self.p("stddev") == 0 or self.p("stddev") is None:
-            self.kl_loss_var = None
-        else:
-            self.kl_loss_var = K.variable(0.0, dtype=np.float, name='kl_loss_weight')
 
         if self.p("pp_weight") == 0 or self.p("pp_weight") is None:
             self.pp_loss_var = None
@@ -248,9 +252,9 @@ class TriTransformer:
                                                                  return_att=True)
 
                 dec_output = debugPrint(dec_output, "DEC_OUTPUT")
+                # Do not perform softmax on output
+                # As it is performed in the loss function
                 final_output.append(self.target_layer(dec_output))
-                # final_output = Softmax()(final_output)
-                # final_output[-1] = debugPrint(final_output[-1], "FINAL_OUTPUT")
 
             # Property prediction
             if self.p("latent_dim") is None:
@@ -287,8 +291,6 @@ class TriTransformer:
                 return - 0.5 * self.kl_loss_var * tf.reduce_mean(1 + z_log_var_ - K.square(z_mean_) - K.exp(z_log_var_),
                                                                  name='KL_loss_sum')
 
-
-
             # PROPERTY PREDICTION LOSS
             def pp_loss(args):
                 prop_input_, prop_output_ = args
@@ -309,7 +311,6 @@ class TriTransformer:
             kl = None
 
             # MMD penality
-
 
             # WAE_loss = lambda x: self.kl_loss_var * self.wae_mmd(x[0], x[1])
             # WAE_loss = lambda x: self.mmd_penalty(x[0], x[1], kernel='RBF')
@@ -401,9 +402,9 @@ class TriTransformer:
 
         # First get the latent representation
 
-        target_seq = np.zeros((1, self.len_limit), dtype='int32')
+        target_seq = np.zeros((1, self.p("len_limit")), dtype='int32')
         target_seq[0, 0] = self.o_tokens.startid()
-        for i in range(self.len_limit - 1):
+        for i in range(self.p("len_limit") - 1):
             output = self.output_model.predict_on_batch([src_seq, target_seq])
             sampled_index = np.argmax(output[0, i, :])
             sampled_token = self.o_tokens.token(sampled_index)
@@ -426,10 +427,10 @@ class TriTransformer:
         latent_rep = self.encode_model.predict_on_batch(src_seq)
 
         decoded_tokens = []
-        target_seq = np.zeros((1, self.len_limit), dtype='int32')
+        target_seq = np.zeros((1, self.p("len_limit")), dtype='int32')
         target_seq[0, 0] = self.o_tokens.startid()
 
-        for i in range(self.len_limit - 1):
+        for i in range(self.p("len_limit") - 1):
             output = self.decode_model.predict_on_batch([latent_rep, target_seq])
             sampled_index = np.argmax(output[0, i, :])
             sampled_token = self.o_tokens.token(sampled_index)
@@ -439,7 +440,6 @@ class TriTransformer:
         return delimiter.join(decoded_tokens[:-1])
 
     def beam_search(self, input_seq, topk=5, delimiter=''):
-        if self.decode_model is None: self.make_fast_decode_model()
         src_seq = self.make_src_seq_matrix(input_seq)
         src_seq = src_seq.repeat(topk, 0)
         latent_rep = self.encode_model.predict_on_batch(src_seq)
@@ -448,15 +448,15 @@ class TriTransformer:
         decoded_tokens = [[] for _ in range(topk)]
         decoded_logps = [0] * topk
         lastk = 1
-        target_seq = np.zeros((topk, self.len_limit), dtype='int32')
+        target_seq = np.zeros((topk, self.p("len_limit")), dtype='int32')
         target_seq[:, 0] = self.o_tokens.startid()
 
-        if self.bottleneck == "none":
+        if self.p("bottleneck") == "none":
             output_symbol = lambda x: self.decode_model.predict_on_batch([src_seq, latent_rep, x])
         else:
             output_symbol = lambda x: self.decode_model.predict_on_batch([latent_rep, x])
 
-        for i in range(self.len_limit - 1):
+        for i in range(self.p("len_limit") - 1):
             if lastk == 0 or len(final_results) > topk * 3: break
             output = output_symbol(target_seq)
             output = np.exp(output[:, i, :])
@@ -485,8 +485,9 @@ class TriTransformer:
         return final_results
 
     def wae_mmd(self, sample_qz):
-        sample_pz = K.random_normal(shape=[self.p("batch_size"), self.p("latent_dim")], mean=0.0, stddev=self.p("stddev"),
-                                  dtype=tf.float32)
+        sample_pz = K.random_normal(shape=[self.p("batch_size"), self.p("latent_dim")], mean=0.0,
+                                    stddev=self.p("stddev"),
+                                    dtype=tf.float32)
 
         s = 10
         # batch size
@@ -510,7 +511,7 @@ class TriTransformer:
             # Returns a vector of n^2 distances
             # mat = tf.matmul(A - B, K.transpose(A - B))
 
-            return K.exp((-0.5/ s ** 2) * distances)
+            return K.exp((-0.5 / s ** 2) * distances)
 
         def K_MAT(A, B):
             '''
@@ -561,7 +562,7 @@ class TriTransformer:
         # -2/n * sum k(zp_l, zq_j) for all l, j
         MMD.append(-2 * tf.reduce_sum(K_MAT(sample_pz, sample_qz)) / n ** 2)
 
-        return self.kl_loss_var*tf.reduce_sum(MMD)
+        return self.kl_loss_var * tf.reduce_sum(MMD)
 
     def mmd_penalty(self, sample_qz):
         '''
@@ -573,7 +574,7 @@ class TriTransformer:
         :param sample_pz:
         :return:
         '''
-        kernel='RBF'
+        kernel = 'RBF'
         sample_pz = K.random_normal(shape=[self.p("batch_size"), self.p("latent_dim")], mean=0.0,
                                     stddev=self.p("stddev"),
                                     dtype=tf.float32)
@@ -636,4 +637,4 @@ class TriTransformer:
                 res2 = C / (C + distances)
                 res2 = tf.reduce_sum(res2) * 2. / (nf * nf)
                 stat += res1 - res2
-        return self.kl_loss_var*stat
+        return self.kl_loss_var * stat
