@@ -2,7 +2,6 @@ from __future__ import print_function
 
 import argparse
 import os
-import h5py
 import numpy as np
 
 from keras.optimizers import Adam
@@ -24,11 +23,11 @@ NUM_EPOCHS = 20
 BATCH_SIZE = 50
 LATENT_DIM = 128
 RANDOM_SEED = 1403
-DATA = 'data/zinc_10k.txt'
+DATA = 'data/zinc_100k.txt'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'avg_model12'
+MODEL_NAME = 'avg_model16'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -137,6 +136,7 @@ def main():
     MODEL_DIR = args.models_dir + args.model + "/"
 
     from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, TensorBoard
+
     ## VARIATIONAL AUTOENCODER
     if args.model_arch == "VAE":
 
@@ -258,10 +258,13 @@ def main():
         # Set up model
         if N_GPUS == 1:
             model = model_arch(tokens, params)
+            model.build_models()
         else:
             # Want to set model up in the CPU
             with tf.device("/cpu:0"):
                 model = model_arch(tokens, params)
+                model.build_models()
+
         # Learning rate scheduler
         callbacks = []
         callbacks.append(LRSchedulerPerStep(params.get("d_model"),
