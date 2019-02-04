@@ -213,61 +213,6 @@ def GetSubMask(s):
 
 class Encoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
-                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=0.01):
-        self.emb_layer = word_emb
-        self.pos_layer = pos_emb
-        self.layers = [EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
-
-        if latent_dim is None:
-            self.latent_dim = d_model
-        else:
-            self.latent_dim = latent_dim
-
-        self.stddev = stddev
-
-    def __call__(self, src_seq, src_pos, return_att=False, active_layers=999):
-        h = self.emb_layer(src_seq)
-
-        if src_pos is not None:
-            pos = self.pos_layer(src_pos)
-            h = Add()([h, pos])
-        if return_att: atts = []
-        mask = Lambda(lambda x: GetPadMask(x, x))(src_seq)
-        for enc_layer in self.layers[:active_layers]:
-            h, att = enc_layer(h, mask)
-            if return_att: atts.append(att)
-
-        # Set up bottleneck
-
-        if self.stddev is None:
-            # Model isn't probabilistic
-            z_mean = Dense(self.latent_dim, name='z_mean', activation='linear')(h)
-            z_log_var = None
-            kl_loss = 0
-            z_samp = z_mean
-        else:
-            # Include variational component
-            # Sampling function
-            def sampling(args):
-                z_mean_, z_log_var_ = args
-                batch_size = K.shape(z_mean_)[0]
-                seq_length = K.shape(z_mean_)[1]
-                epsilon = K.random_normal(shape=(batch_size, seq_length, self.latent_dim), mean=0., stddev=self.stddev)
-                # z_mean_ = tf.Print(z_mean_, [tf.shape(z_mean_)])
-                # epsilon = tf.Print(epsilon, [tf.shape(epsilon)])
-
-                return z_mean_ + K.exp(z_log_var_ / 2) * epsilon
-
-            z_mean = Dense(self.latent_dim, name='z_mean', activation='linear')(h)
-            z_log_var = Dense(self.latent_dim, name='z_log_var', activation='linear')(h)
-            z_samp = Lambda(sampling, name='lambda')([z_mean, z_log_var])
-            kl_loss = - 0.5 * K.mean(1 + z_log_var - K.square(z_mean) - K.exp(z_log_var), axis=-1)
-
-        return (z_samp, kl_loss, z_mean, z_log_var, atts) if return_att else (z_samp, kl_loss, z_mean, z_log_var)
-
-
-class VariationalEncoder():
-    def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
                  layers=6, dropout=0.1, word_emb=None, pos_emb=None):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
@@ -338,8 +283,8 @@ class Vec2Variational():
     def __call__(self, h):
         # src_seq not used; just included to match
         # calling structure of other decoders
-        mean = h;
-        logvar = h;
+        mean = h
+        logvar = h
         for layer in self.mean_layers:
             mean = layer(mean)
 
@@ -587,8 +532,8 @@ class InterimDecoder2():
         # Calculate 'decoder_width' means/variances from output
         # self.mean_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_mean_layer')
         # self.logvar_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_logvar_layer')
-        self.mean_layer = Dense(self.latent_dim, input_shape=(self.latent_dim* d_model,), name='ID2_mean_layer')
-        self.logvar_layer = Dense(self.latent_dim, input_shape=(self.latent_dim* d_model,), name='ID2_logvar_layer')
+        self.mean_layer = Dense(self.latent_dim, input_shape=(self.latent_dim * d_model,), name='ID2_mean_layer')
+        self.logvar_layer = Dense(self.latent_dim, input_shape=(self.latent_dim * d_model,), name='ID2_logvar_layer')
         # For the very first vector
         self.attn = TimeDistributed(Dense(self.width, input_shape=(d_model,), activation='linear'), name='ID2_ATTN')
 
@@ -605,22 +550,23 @@ class InterimDecoder2():
         :return:
         '''
         z_init = self.first_iter(src_seq, enc_output)
+
         def the_loop(args):
             z_init_ = args
 
             # use interim decoder to generate latent dimension iteratively
             z_embedded, _, _ = tf.while_loop(self.cond, self.step,
-                                       [z_init_, src_seq, enc_output],
-                                       shape_invariants=[tf.TensorShape([None, None, self.d_model]),
-                                                         src_seq.get_shape(),
-                                                         enc_output.get_shape()],name='ID2_LOOP')
+                                             [z_init_, src_seq, enc_output],
+                                             shape_invariants=[tf.TensorShape([None, None, self.d_model]),
+                                                               src_seq.get_shape(),
+                                                               enc_output.get_shape()], name='ID2_LOOP')
 
             # will generate too many latent dimensions, so clip it
             # s = Lambda(lambda x: x[:, :self.latent_dim, :],name="ID2_FINAL_SLICE")
             # z_embedded = s(z_embedded)
             z_embedded = z_embedded[:, :self.latent_dim, :]
             # z_embedded = K.reshape(z_embedded, [-1, self.latent_dim, self.d_model])
-            z_embedded = K.reshape(z_embedded, [-1, self.latent_dim*self.d_model])
+            z_embedded = K.reshape(z_embedded, [-1, self.latent_dim * self.d_model])
             return z_embedded
             # return K.reshape(z_embedded, )
 
@@ -652,7 +598,7 @@ class InterimDecoder2():
         enc_mask = None
         # Run through interim decoder
         for dec_layer in self.layers:
-            z, self_att, enc_att = dec_layer(z, enc_output)#, self_mask, enc_mask)
+            z, self_att, enc_att = dec_layer(z, enc_output)  # , self_mask, enc_mask)
             # if return_att:
             #     self_atts.append(self_att)
             #     enc_atts.append(enc_att)
@@ -678,7 +624,6 @@ class InterimDecoder2():
         # z_i = Lambda(lambda x: x[:, -self.width:, :self.d_model])(z_dec)
         z_i = s2(s(z_i))
         z = self.concat([z_so_far, z_i])
-
 
         return [z, src_seq, enc_output]
 
@@ -798,6 +743,16 @@ class FalseEmbeddingsNonTD():
         # self.time_norm = TimeDistributed(BatchNormalization())
         self.final_shape = Lambda(lambda x: K.reshape(x, [-1, latent_len, d_emb]))
 
+        # Add positional embedding?
+        train_posemb = True
+        if train_posemb:
+            self.pos_emb = Embedding(latent_len, d_emb, trainable=True)
+        else:
+            self.pos_emb = Embedding(latent_len, d_emb, trainable=False,
+                                     weights=[GetPosEncodingMatrix(latent_len, d_emb)])
+
+        self.pos_seq = Lambda(lambda x: self.pos_emb(K.cumsum(K.ones([K.shape(x)[0], latent_len], 'int32'), 1) - 1))
+        # self.pos_emb = None
     def __call__(self, z):
         '''
 
@@ -825,6 +780,15 @@ class FalseEmbeddingsNonTD():
         z = self.init_layer(z)
         z = self.final_shape(z)
 
+        if self.pos_emb:
+            z = Add()([z, self.pos_seq(z)])
+
+        # z = Add()([z, self.pos_emb(self.pos_seq(z))])
+
+        # mask = K.cast(K.not_equal(x, 0), 'int32')
+        # pos = K.cumsum(K.ones_like(x, 'int32'), 1)
+        # return pos * mask
+
         # for layer in self.deep_time_layers:
         #     if self.residual:
         #         z = Add()([z, layer(z)])
@@ -836,53 +800,6 @@ class FalseEmbeddingsNonTD():
         #     # z = Dropout(rate=0.4)(z)
 
         return z
-
-
-class LatentToEmbedded():
-    def __init__(self, d_model, latent_dim=None, stddev=1):
-        if latent_dim is None:
-            # if there is no latent dim we are not using a bottleneck
-            # so the data is simply a matrix of size [batch_size, len_limit, d_model]
-
-            def sampling(args):
-                z_mean_, z_logvar_ = args
-                batch_size = K.shape(z_mean_)[0]
-                len_limit = K.shape(z_mean_)[1]
-                epsilon = K.random_normal(shape=(batch_size, len_limit, d_model), mean=0., stddev=self.stddev)
-                return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, len_limit, d_model])
-
-            self.expander = None
-        else:
-            self.expander = FalseEmbeddings(d_model)
-
-            def sampling(args):
-                z_mean_, z_logvar_ = args
-                batch_size = K.shape(z_mean_)[0]
-                epsilon = K.random_normal(shape=(batch_size, self.latent_dim), mean=0., stddev=self.stddev)
-                return K.reshape(z_mean_ + K.exp(z_logvar_ / 2) * epsilon, [batch_size, self.latent_dim])
-        self.stddev = stddev
-        self.latent_dim = latent_dim
-
-        self.sampler = Lambda(sampling, name='LatentToEmbeddingSampler')
-
-    def __call__(self, z_mean, z_logvar):
-        # Sample from the means/variances decoded so far
-        # Gives vector of size (batch_size, latent_dim)
-        if self.stddev is None or self.stddev == 0:
-            sampled_z = z_mean
-        else:
-            sampled_z = self.sampler([z_mean, z_logvar])
-
-        sampled_z = debugPrint(sampled_z, "SAMPLED Z")
-
-        # If there is a bottleneck, we need to expand back to model dimension
-        # Now size (batch_size, latent_dim, d_model)
-        if self.expander is None:
-            expanded_z = sampled_z
-        else:
-            expanded_z = self.expander(sampled_z)
-
-        return sampled_z, expanded_z  # self.expander_layer(sampled_z)
 
 
 class DecoderFromLatent():
@@ -927,19 +844,12 @@ class DecoderFromLatent():
 
 class Decoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
-                 layers=6, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None):
+                 layers=6, dropout=0.1, word_emb=None, pos_emb=None):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
-        if not latent_dim is None:
-            self.bridge = Dense(d_model, input_shape=(latent_dim,))
-        else:
-            self.bridge = None
 
     def __call__(self, tgt_seq, tgt_pos, src_seq, enc_output, return_att=False, active_layers=999):
-        if self.bridge is not None:
-            enc_output = self.bridge(enc_output)
-
         dec = self.emb_layer(tgt_seq)
         pos = self.pos_layer(tgt_pos)
         x = Add()([dec, pos])
@@ -948,7 +858,7 @@ class Decoder():
         self_sub_mask = Lambda(GetSubMask)(tgt_seq)
         self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
         # TODO(Basil) Use encoder mask that actually matches dimensions from interim decoder
-        enc_mask = None  # Lambda(lambda x: GetPadMask(x[0], x[1]))([tgt_seq, src_seq])
+        enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([tgt_seq, src_seq])
 
         if return_att: self_atts, enc_atts = [], []
 
