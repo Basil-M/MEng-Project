@@ -27,7 +27,7 @@ DATA = 'data/zinc_100k.txt'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'avg_model16'
+MODEL_NAME = 'avg_wae'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -66,13 +66,14 @@ def get_arguments():
                         help='Model architecture to use - options are VAE, TRANSFORMER')
     parser.add_argument('--base_lr', type=float, metavar='0.001', default=0.001,
                         help='Base training rate for ADAM optimizer')
-
     parser.add_argument('--kl_pretrain_epochs', type=float, metavar='1', default=default.get("kl_pretrain_epochs"),
                         help='Number of epochs to train before introducing KL loss')
     parser.add_argument('--kl_anneal_epochs', type=float, metavar='5', default=default.get("kl_anneal_epochs"),
                         help='Number of epochs to anneal over')
     parser.add_argument('--kl_max_weight', type=float, metavar='1', default=default.get("kl_max_weight"),
                         help='Maximum KL weight')
+    parser.add_argument('--RBF_s', type=float, metavar='1', default=default.get("RBF_s"),
+                        help='Scale factor to use for RBF for Wasserstein fitting. If 0, will use ELBO instead (default).')
 
     parser.add_argument('--pp_weight', type=float, metavar='1.5', default=default.get("pp_weight"),
                         help='For joint optimisation: Amount to weight MSE loss of property predictor')

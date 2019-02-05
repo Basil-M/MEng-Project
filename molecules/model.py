@@ -114,7 +114,7 @@ class TriTransformer:
 
         self.o_tokens = o_tokens
         self.src_loc_info = True
-        self.decode_model = None
+        self.decode = None
 
         self.pp_layers = self.p("pp_layers")
         d_emb = self.p("d_model")
@@ -344,13 +344,16 @@ class TriTransformer:
         self.output_attns = Model(src_seq_input, attn_list)
 
         # ENCODING/DECODING MODELS
-        self.encode_model = Model(src_seq_input, z_sampled)
-        self.decode_model = Model([z_input, tgt_seq_input], final_output[0])
+        self.encode = Model(src_seq_input, [z_mean, z_logvar])
+        self.encode_sample = Model(src_seq_input, [z_sampled])
+        self.decode = Model([z_input, tgt_seq_input], final_output[0])
+
 
     def compile_vae(self, optimizer='adam', N_GPUS=1):
+        self.encode_sample.compile('adam', 'mse')
+        self.encode.compile('adam', 'mse')
+        self.decode.compile('adam', 'mse')
 
-        self.encode_model.compile('adam', 'mse')
-        self.decode_model.compile('adam', 'mse')
         if N_GPUS != 1:
             self.autoencoder = multi_gpu_model(self.autoencoder, N_GPUS)
 
@@ -367,23 +370,33 @@ class TriTransformer:
         :param input_seq:
         :return:
         '''
-        src_seq = np.zeros((1, len(input_seq) + 3), dtype='int32')
-        src_seq[0, 0] = self.i_tokens.startid()
-        for i, z in enumerate(input_seq):
-            src_seq[0, 1 + i] = self.i_tokens.id(z)
-        src_seq[0, len(input_seq) + 1] = self.i_tokens.endid()
+        if isinstance(input_seq, str):
+            src_seq = np.zeros((1, len(input_seq) + 3), dtype='int32')
+            src_seq[0, 0] = self.i_tokens.startid()
+            for i, z in enumerate(input_seq):
+                src_seq[0, 1 + i] = self.i_tokens.id(z)
+            src_seq[0, len(input_seq) + 1] = self.i_tokens.endid()
+        else:
+            src_seq = np.expand_dims(input_seq,0)
+
         return src_seq
 
-    def decode_sequence(self, input_seq, delimiter=''):
-        src_seq = self.make_src_seq_matrix(input_seq)
-        decoded_tokens = []
-
+    def decode_sequence(self, input_seq, delimiter='', moments=None):
         # First get the latent representation
-
         target_seq = np.zeros((1, self.p("len_limit")), dtype='int32')
         target_seq[0, 0] = self.o_tokens.startid()
+
+        decoded_tokens = []
+        # If mean/variance not provided, calculate
+        if moments is None:
+            src_seq = self.make_src_seq_matrix(input_seq)
+            z = self.encode_sample.predict_on_batch([src_seq, target_seq])
+        else:
+            mean, logvar = moments
+            z = mean + np.exp(logvar)*np.random.normal(0,1,np.shape(mean))
+
         for i in range(self.p("len_limit") - 1):
-            output = self.output_model.predict_on_batch([src_seq, target_seq])
+            output = self.decode.predict_on_batch([z, target_seq])
             sampled_index = np.argmax(output[0, i, :])
             sampled_token = self.o_tokens.token(sampled_index)
             decoded_tokens.append(sampled_token)
@@ -391,25 +404,27 @@ class TriTransformer:
             target_seq[0, i + 1] = sampled_index
         return delimiter.join(decoded_tokens[:-1])
 
-    def decode_sequence_fast(self, input_seq, delimiter=''):
+    def decode_sequence_fast(self, input_seq, delimiter='', moments=None):
         '''
         Greedy decodes a sequence by keeping the most probable output symbol at each stage
         :param input_seq: String e.g. 'Cc1cccc1'
         :param delimiter:
         :return: output sequence as a string
         '''
-
-        src_seq = self.make_src_seq_matrix(input_seq)
-
-        # Encode input to latent representation
-        latent_rep = self.encode_model.predict_on_batch(src_seq)
-
         decoded_tokens = []
         target_seq = np.zeros((1, self.p("len_limit")), dtype='int32')
         target_seq[0, 0] = self.o_tokens.startid()
 
+        # If mean/variance not provided, calculate
+        if moments is None:
+            src_seq = self.make_src_seq_matrix(input_seq)
+            z = self.encode_sample.predict_on_batch([src_seq, target_seq])
+        else:
+            mean, logvar = moments
+            z = mean + np.exp(logvar)*np.random.normal(0,1,np.shape(mean))
+
         for i in range(self.p("len_limit") - 1):
-            output = self.decode_model.predict_on_batch([latent_rep, target_seq])
+            output = self.decode.predict_on_batch([z, target_seq])
             sampled_index = np.argmax(output[0, i, :])
             sampled_token = self.o_tokens.token(sampled_index)
             decoded_tokens.append(sampled_token)
@@ -417,10 +432,16 @@ class TriTransformer:
             target_seq[0, i + 1] = sampled_index
         return delimiter.join(decoded_tokens[:-1])
 
-    def beam_search(self, input_seq, topk=5, delimiter=''):
-        src_seq = self.make_src_seq_matrix(input_seq)
-        src_seq = src_seq.repeat(topk, 0)
-        latent_rep = self.encode_model.predict_on_batch(src_seq)
+    def beam_search(self, input_seq=None, topk=5, delimiter='', moments=None):
+        # If mean/variance not provided, calculate
+        if moments is None:
+            src_seq = self.make_src_seq_matrix(input_seq)
+            z = self.encode_sample.predict_on_batch(src_seq)
+        else:
+            mean, logvar = moments
+            z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
+
+        z = z.repeat(topk, 0)
 
         final_results = []
         decoded_tokens = [[] for _ in range(topk)]
@@ -429,14 +450,9 @@ class TriTransformer:
         target_seq = np.zeros((topk, self.p("len_limit")), dtype='int32')
         target_seq[:, 0] = self.o_tokens.startid()
 
-        if self.p("bottleneck") == "none":
-            output_symbol = lambda x: self.decode_model.predict_on_batch([src_seq, latent_rep, x])
-        else:
-            output_symbol = lambda x: self.decode_model.predict_on_batch([latent_rep, x])
-
         for i in range(self.p("len_limit") - 1):
             if lastk == 0 or len(final_results) > topk * 3: break
-            output = output_symbol(target_seq)
+            output = self.decode.predict_on_batch([z, target_seq])
             output = np.exp(output[:, i, :])
             output = np.log(output / np.sum(output, -1, keepdims=True) + 1e-8)
             cands = []
