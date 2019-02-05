@@ -6,6 +6,7 @@ from keras.optimizers import Adam
 from scipy.stats import rv_continuous, kurtosis
 import argparse
 from os.path import exists
+import time, progressbar
 
 ## LOGGING
 import logging
@@ -21,6 +22,29 @@ from utils import calculateScore as SAS
 
 IBUPROFEN_SMILES = 'CC(C)CC1=CC=C(C=C1)C(C)C(=O)O'
 ZINC_RANDOM = 'C[NH+](CC1CCCC1)[C@H]2CCC[C@@H](C2)O'
+
+import contextlib
+import os, sys
+
+
+@contextlib.contextmanager
+def supress_stderr():
+    """
+    A context manager to temporarily disable stderr
+    """
+    stdchannel = sys.stderr
+    dest_filename = os.devnull
+    try:
+        oldstdchannel = os.dup(stdchannel.fileno())
+        dest_file = open(dest_filename, 'w')
+        os.dup2(dest_file.fileno(), stdchannel.fileno())
+
+        yield
+    finally:
+        if oldstdchannel is not None:
+            os.dup2(oldstdchannel, stdchannel.fileno())
+        if dest_file is not None:
+            dest_file.close()
 
 
 class rv_gaussian(rv_continuous):
@@ -95,33 +119,46 @@ def property_distributions(test_data_file, num_seeds, num_decodings, attn_model:
     # define decoding function
 
     if beam_width == 1:
-        output = lambda x,y: attn_model.decode_sequence_fast(input_seq=seq, moments=[x,y])
+        output = lambda x, y: attn_model.decode_sequence_fast(input_seq=seq, moments=[x, y])
     else:
-        output = lambda x,y: np.array(attn_model.beam_search(input_seq=seq, topk=beam_width, moments=[x,y]))[:,0]
+        output = lambda x, y: np.array(attn_model.beam_search(input_seq=seq, topk=beam_width, moments=[x, y]))
 
+    # progressbar
     # decode molecules multiple times
     output_itr = []
     gen_props = []
-    for seq in test_SMILES:
-        # get mean/variance
-        mu, logvar = attn_model.encode.predict_on_batch(np.expand_dims(seq,0))
-        for dec_itr in range(num_decodings):
-            # c_output = output(mu,logvar)
-            s = output(mu,logvar)
-            output_itr.extend(s)
-            # output_itr += output(mu, logvar)
+    bar_i = 0
+    widgets = [
+        ' [', progressbar.Timer(), '] ',
+        progressbar.Bar(),
+        ' (', progressbar.ETA(), ') ',
+    ]
 
-        # only keep if it's unique
-        for mol in output_itr:
-            if mol not in output_molecules:
-                output_molecules.append(mol)
-                mol = Chem.MolFromSmiles(mol)
-                # mol is None if it wasn't a valid SMILES string
-                if mol:
-                    try:
-                        gen_props.append([QED(mol), LogP(mol), MolWt(mol), SAS(mol)])
-                    except:
-                        print("Could not calculate properties for ", Chem.MolToSmiles(mol))
+
+    with progressbar.ProgressBar(maxval=num_seeds * num_decodings, widgets=widgets) as bar:
+        for seq in test_SMILES:
+            # get mean/variance
+            mu, logvar = attn_model.encode.predict_on_batch(np.expand_dims(seq, 0))
+            for dec_itr in range(num_decodings):
+                # c_output = output(mu,logvar)
+                s = output(mu, logvar)
+                if s.ndim > 1: s = s[:, 0]
+
+                with supress_stderr():
+                    for mol in s:
+                        # keep if unique
+                        if mol not in output_molecules:
+                            output_molecules.append(mol)
+                            mol = Chem.MolFromSmiles(mol)
+                            # mol is None if it wasn't a valid SMILES string
+                            if mol:
+                                try:
+                                    gen_props.append([QED(mol), LogP(mol), MolWt(mol), SAS(mol)])
+                                except:
+                                    print("Could not calculate properties for {}".format(Chem.MolToSmiles(mol)))
+                bar_i += 1
+                # print(bar_i)
+                bar.update(bar_i)
 
     print("Generated {} unique sequences, of which {} were valid.".format(len(output_molecules), len(gen_props)))
 
