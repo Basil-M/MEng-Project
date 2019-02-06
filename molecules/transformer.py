@@ -648,7 +648,7 @@ class InterimDecoder3():
         self.width = decoder_width
 
         # Calculate means/variances from output
-        fin_length = np.ceil(self.latent_dim*d_model/decoder_width)
+        fin_length = np.ceil(self.latent_dim/decoder_width)
         self.mean_layer = Dense(self.latent_dim, input_shape=(d_model*fin_length,), name='ID3_mean_layer')
         self.logvar_layer = Dense(self.latent_dim, input_shape=(d_model*fin_length,), name='ID3_logvar_layer')
 
@@ -659,6 +659,7 @@ class InterimDecoder3():
 
         self.ldim = K.constant(fin_length, dtype='int32')
         self.next_z = Lambda(self.compute_next_z, name='ComputeZ')
+
     def __call__(self, src_seq, enc_output):
         '''
         Will iteratively compute means and variances
@@ -679,7 +680,7 @@ class InterimDecoder3():
                                                                enc_output.get_shape()], name='ID2_LOOP')
 
             # will generate too many latent dimensions, so clip it
-            return K.reshape(z_embedded,[-1, self.ldim])
+            return K.reshape(z_embedded,[-1, self.ldim*self.d_model])
             # return K.reshape(z_embedded, )
 
         z_emb = Lambda(the_loop)(z_init)
