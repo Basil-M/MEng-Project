@@ -5,6 +5,7 @@ from dataloader import SmilesToArray, AttnParams, MakeSmilesDict, MakeSmilesData
 from keras.optimizers import Adam
 from scipy.stats import rv_continuous, kurtosis
 import argparse
+
 from os.path import exists
 import time, progressbar
 
@@ -55,13 +56,15 @@ class rv_gaussian(rv_continuous):
 def get_arguments():
     parser = argparse.ArgumentParser(description='Molecular autoencoder analysis')
     parser.add_argument('--model_path', type=str, help='Path to model directory e.g. models/VA_192/',
-                        default="models/avg_wae/")
+                        default="models/AVG_WAE_s10/")
     parser.add_argument('--beam_width', type=int, help='Beam width e.g. 5. If 1, will use greedy decoding.',
                         default=5)
     parser.add_argument('--n_seeds', type=int, help='Number of seeds to use latent exploration',
                         default=109, metavar='100')
     parser.add_argument('--n_decodings', type=int, help='Number of decodings for each seed for latent exploration',
                         default=2, metavar='2')
+    parser.add_argument('--plot_kd', type=bool, help='Plot distributions of test data in latent space',
+                        default=True, metavar='True')
     return parser.parse_args()
 
 
@@ -70,29 +73,38 @@ def latent_distributions(latents_file, plot_kd=False):
 
     with h5py.File(latents_file) as dfile:
         z_test = np.array(dfile['z_test'])
-        z_train = np.array(dfile['z_train'])
+        # z_train = np.array(dfile['z_train'])
 
         k_test = kurtosis(z_test)
-        k_train = kurtosis(z_train)
-        print("\tTraining:\n\t\tMean\t{:.2f}\n\t\tStd\t{:.2f}".format(np.mean(k_train), np.std(k_train)))
+        # k_train = kurtosis(z_train)
+        # print("\tTraining:\n\t\tMean\t{:.2f}\n\t\tStd\t{:.2f}".format(np.mean(k_train), np.std(k_train)))
         print("\tTesting:\n\t\tMean\t{:.2f}\n\t\tStd\t{:.2f}".format(np.mean(k_test), np.std(k_test)))
 
-    # latent_dim = np.shape(z)[1]
-    # KL_div = np.zeros(latent_dim)
-    # unit_gauss = rv_gaussian(name='unit_normal')
-    # for i in range(latent_dim):
-    #     # Get the ith latent dimension
-    #     z_i = z[:, i]
-    #     mu_i = np.mean(z_i)
-    #     std_i = np.std(z_i)
-    #     z_i = (z_i - mu_i)/std_i
-    #
-    #     # Kernel density estimate
-    #     hist_i = np.histogram(z_i, 100)
-    #     z_rv = rv_histogram(hist_i)
-    #     KL_div[i] = z_rv.entropy()/unit_gauss.entropy()
-    #
-    # return KL_div
+    if plot_kd:
+        # Get relevant modules
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        sns.set()
+
+        latent_dim = np.shape(z_test)[1]
+        from distutils.spawn import find_executable
+        if find_executable('latex'):
+            plt.rc('text', usetex=True)
+            plt.rc('font', family='serif')
+            xlab = "$z_i"
+        else:
+            xlab = "z_i"
+
+        print("Performing kernel density estimates:")
+        for i in progressbar.progressbar(range(latent_dim)):
+            sns.distplot(z_test[:, i], hist=False, kde=True,
+                         kde_kws={'linewidth': 1})
+        plt.xlabel(xlab)
+        plt.ylabel("KD")
+
+        filepath = os.path.dirname(latents_file) + "/kd_est.png"
+        print("Saving kd plot in ", filepath)
+        plt.savefig(filepath)
 
 
 def property_distributions(test_data_file, num_seeds, num_decodings, attn_model: TriTransformer, beam_width=1):
@@ -133,7 +145,6 @@ def property_distributions(test_data_file, num_seeds, num_decodings, attn_model:
         progressbar.Bar(),
         ' (', progressbar.ETA(), ') ',
     ]
-
 
     with progressbar.ProgressBar(maxval=num_seeds * num_decodings, widgets=widgets) as bar:
         for seq in test_SMILES:
@@ -189,20 +200,20 @@ def main():
 
     # Assess how close each dimension is to a Gaussian
     # Try to load property training data
-    # if not exists(model_dir + "latents.h5"):
-    #     print("Generating latent representations from auto-encoder")
-    #     data_train, data_test, props_train, props_test = MakeSmilesData(d_file, tokens=tokens,
-    #                                                                     h5_file=d_file.replace('.txt',
-    #                                                                                            '_data.h5'))
-    #     # z_train = model.encode_model.predict([data_train], 64)
-    #     z_test = model.encode.predict([data_test], 64)
-    #
-    #     with h5py.File(model_dir + "latents.h5", 'w') as dfile:
-    #         dfile.create_dataset('z_test', data=z_test)
-    #         # dfile.create_dataset('z_train', data=z_train)
-    #
-    # print("KURTOSIS:")
-    # latent_distributions(model_dir + 'latents.h5')
+    if not exists(model_dir + "latents.h5"):
+        print("Generating latent representations from auto-encoder")
+        data_train, data_test, props_train, props_test = MakeSmilesData(d_file, tokens=tokens,
+                                                                        h5_file=d_file.replace('.txt',
+                                                                                               '_data.h5'))
+        z_train = model.encode_sample.predict([data_train], 64)
+        z_test = model.encode_sample.predict([data_test], 64)
+
+        with h5py.File(model_dir + "latents.h5", 'w') as dfile:
+            dfile.create_dataset('z_test', data=z_test)
+            dfile.create_dataset('z_train', data=z_train)
+
+    print("KURTOSIS:")
+    latent_distributions(model_dir + 'latents.h5', plot_kd=True)
 
     # Test random molecule
     print("Example decodings with ibruprofen (beam width = 5):")
@@ -228,6 +239,8 @@ def main():
         print("\t\tData:\t {:.2f} ± {:.2f}".format(np.mean(gen_dat), np.std(gen_dat)))
         print("\t\tGen:\t {:.2f} ± {:.2f}".format(np.mean(dat), np.std(dat)))
 
-
+def delete_if_exists(filename):
+    if exists(filename):
+        os.remove(filename)
 if __name__ == '__main__':
     main()

@@ -802,6 +802,74 @@ class FalseEmbeddingsNonTD():
         return z
 
 
+class FalseEmbeddingsNonTD():
+    def __init__(self, d_emb, d_latent, residual=True):
+        '''
+        Given a 1D vector, attempts to create 'false' embeddings to
+        go from latent space
+        :param d_emb: dimensionality of false embeddings
+        '''
+        NUM_LAYERS = 0
+        latent_len = 50
+        self.init_layer = Dense(d_emb * latent_len, input_shape=(d_latent,))
+
+        # self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,)))
+        self.deep_layers = [Dense(d_latent, activation=ACT, input_shape=(d_latent,)) for _ in
+                            range(NUM_LAYERS)]
+
+        # self.deep_time_layers = [TimeDistributed(Dense(d_emb, activation=ACT, input_shape=(d_emb,))) for _ in
+        #                          range(NUM_LAYERS)]
+
+        # Whether or not to employ residual connection
+        self.residual = residual
+        self.activation = Lambda(lambda x: activations.relu(x))
+        self.norm = BatchNormalization()
+        # self.time_norm = TimeDistributed(BatchNormalization())
+        self.final_shape = Lambda(lambda x: K.reshape(x, [-1, latent_len, d_emb]))
+
+        # Add positional embedding?
+        train_posemb = True
+        if train_posemb:
+            self.pos_emb = Embedding(latent_len, d_emb, trainable=True)
+        else:
+            self.pos_emb = Embedding(latent_len, d_emb, trainable=False,
+                                     weights=[GetPosEncodingMatrix(latent_len, d_emb)])
+
+        self.pos_seq = Lambda(lambda x: self.pos_emb(K.cumsum(K.ones([K.shape(x)[0], latent_len], 'int32'), 1) - 1))
+        # self.pos_emb = None
+    def __call__(self, z):
+        '''
+
+        :param z: Input with dimensionality [batch_size, d] or [batch_size, d, 1]
+        :return: Falsely embedded output with dimensionality [batch_size, d, d_emb]
+        '''
+
+        # use fully connected layer to expand to [batch_size, d, d_emb]
+
+        for (i, layer) in enumerate(self.deep_layers):
+            if self.residual:
+                z = Add()([z, layer(z)])
+                # z = z + layer(z)
+            else:
+                z = layer(z)
+
+            z = self.norm(z)
+            # z = Lambda(lambda a: a[0] + a[1])([y, z])
+            z = self.activation(z)
+            # z = Dropout(rate=0.4)(z)
+            # arg = Multiply()([self.scales[i], arg])
+            # arg *= self.scales[i]
+            # arg = Dropout(rate=0.2)(arg)
+
+        z = self.init_layer(z)
+        z = self.final_shape(z)
+
+        if self.pos_emb:
+            z = Add()([z, self.pos_seq(z)])
+
+        return z
+
+
 class DecoderFromLatent():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
                  layers=6, dropout=0.1, word_emb=None, pos_emb=None):
