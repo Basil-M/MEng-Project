@@ -63,8 +63,8 @@ class AttnParams:
             "epochs": 25,
             "kl_pretrain_epochs": 1,
             "kl_anneal_epochs": 3,
-            "kl_max_weight": 10,
-            "RBF_s": 10,
+            "kl_max_weight": 1,
+            "RBF_s": 0,
             "pp_weight": 0,
             "ae_trained": False,
             "batch_size": 20,
@@ -120,6 +120,7 @@ class AttnParams:
                 if "ID" in key:
                     if self._params[key] is None:
                         self._params[key] = self._params[key.replace("ID_", "")]
+
     def dump(self):
         # get max length
         m_len = max([len(key) for key in self._params])
@@ -212,9 +213,9 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
         # Normalise properties
         Ps = np.array(Ps)
         for k in range(np.shape(Ps)[1]):
-            mu = np.mean(Ps[:,k])
-            std = np.std(Ps[:,k])
-            Ps[:,k] = (Ps[:,k] - mu)/std
+            mu = np.mean(Ps[:, k])
+            std = np.std(Ps[:, k])
+            Ps[:, k] = (Ps[:, k] - mu) / std
             Ps_norms.append([mu, std])
 
         # Split testing and training data
@@ -232,7 +233,7 @@ def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0
                 dfile.create_dataset('train', data=train_data)
                 dfile.create_dataset('test_props', data=test_pps)
                 dfile.create_dataset('train_props', data=train_pps)
-                dfile.create_dataset('property_norms', data = Ps_norms)
+                dfile.create_dataset('property_norms', data=Ps_norms)
 
     return train_data, test_data, train_pps, test_pps
 

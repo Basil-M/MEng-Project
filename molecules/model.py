@@ -142,12 +142,12 @@ class TriTransformer:
         elif self.p("bottleneck") == "interim_decoder":
             latent_pos_emb = tr.Embedding(self.p("latent_dim"), self.p("ID_d_model"), trainable=False)
             self.encoder_to_latent = tr.InterimDecoder3(self.p("ID_d_model"), self.p("ID_d_inner_hid"),
-                                                        self.p("ID_heads"), self.p("ID_d_k"), self.p("ID_d_v"),
-                                                        self.p("ID_layers"), self.p("ID_width"), self.p("dropout"),
-                                                        stddev=self.stddev,
-                                                        latent_dim=self.p("latent_dim"),
-                                                        pos_emb=latent_pos_emb,
-                                                        false_emb=None)
+                                                       self.p("ID_heads"), self.p("ID_d_k"), self.p("ID_d_v"),
+                                                       self.p("ID_layers"), self.p("ID_width"), self.p("dropout"),
+                                                       stddev=self.stddev,
+                                                       latent_dim=self.p("latent_dim"),
+                                                       pos_emb=latent_pos_emb,
+                                                       false_emb=None)
 
         elif self.p("bottleneck") == "none":
             self.encoder_to_latent = tr.Vec2Variational(self.p("d_model"), self.p("len_limit"))
@@ -191,37 +191,35 @@ class TriTransformer:
     def build_models(self, active_layers=999):
         src_seq_input = Input(shape=(None,), dtype='int32', name='src_seq_input')
         tgt_seq_input = src_seq_input  # Input(shape=(None,), dtype='int32', name='tgt_seq_input')
-
         src_seq = src_seq_input
-
-        # pr = Lambda(lambda x: tf.Print(x, [x], "\nSRC_SEQ: ", summarize=SUM_AM))
         src_seq = debugPrint(src_seq, "SRC_SEQ")
-        # pr = Lambda(lambda x: tf.Print(x, [x], "\nTGT_SEQ: ", summarize=SUM_AM))
         tgt_seq = Lambda(lambda x: x[:, :-1])(tgt_seq_input)
         tgt_seq = debugPrint(tgt_seq, "TGT_SEQ")
-        # tgt_seq = pr(tgt_seq)
         tgt_true = Lambda(lambda x: x[:, 1:])(tgt_seq_input)
-
         src_pos = Lambda(self.get_pos_seq)(src_seq)
         src_pos = debugPrint(src_pos, "SRC_POS")
-
         tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
         if not self.src_loc_info: src_pos = None
 
+        # Encode input ([bs x max_len x d_model]) into [bs x max_len x d_model]
         enc_output, enc_attn = self.encoder(src_seq,
                                             src_pos,
                                             active_layers=active_layers,
                                             return_att=True)
-
         enc_output = debugPrint(enc_output, "ENC_OUTPUT")
 
+        # variational bottleneck produces [bs x latent_dim]
         if self.p("bottleneck") == "interim_decoder":
-            z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
+            # z_mean, z_logvar, z_sampled = self.encoder_to_latent(src_seq, enc_output) # for ID1
+            z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)  # everything else
         else:
             z_mean, z_logvar = self.encoder_to_latent(enc_output)
 
         # sample from z_mean, z_logvar
         z_sampled = self.sampler([z_mean, z_logvar])
+
+        # generate an 'input' sampled value so we can create a separate
+        # model to decode from latent space
         if self.p("bottleneck") == "none":
             z_input = Input(shape=(None, self.p("d_model")), dtype='float32', name='z_input')
         else:
@@ -348,7 +346,6 @@ class TriTransformer:
         self.encode_sample = Model(src_seq_input, [z_sampled])
         self.decode = Model([z_input, tgt_seq_input], final_output[0])
 
-
     def compile_vae(self, optimizer='adam', N_GPUS=1):
         self.encode_sample.compile('adam', 'mse')
         self.encode.compile('adam', 'mse')
@@ -377,7 +374,7 @@ class TriTransformer:
                 src_seq[0, 1 + i] = self.i_tokens.id(z)
             src_seq[0, len(input_seq) + 1] = self.i_tokens.endid()
         else:
-            src_seq = np.expand_dims(input_seq,0)
+            src_seq = np.expand_dims(input_seq, 0)
 
         return src_seq
 
@@ -393,7 +390,7 @@ class TriTransformer:
             z = self.encode_sample.predict_on_batch([src_seq, target_seq])
         else:
             mean, logvar = moments
-            z = mean + np.exp(logvar)*np.random.normal(0,1,np.shape(mean))
+            z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
 
         for i in range(self.p("len_limit") - 1):
             output = self.decode.predict_on_batch([z, target_seq])
@@ -421,7 +418,7 @@ class TriTransformer:
             z = self.encode_sample.predict_on_batch([src_seq, target_seq])
         else:
             mean, logvar = moments
-            z = mean + np.exp(logvar)*np.random.normal(0,1,np.shape(mean))
+            z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
 
         for i in range(self.p("len_limit") - 1):
             output = self.decode.predict_on_batch([z, target_seq])

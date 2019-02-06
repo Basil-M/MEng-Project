@@ -107,7 +107,8 @@ def latent_distributions(latents_file, plot_kd=False):
         plt.savefig(filepath)
 
 
-def property_distributions(test_data_file, num_seeds, num_decodings, attn_model: TriTransformer, beam_width=1):
+def property_distributions(test_data_file, num_seeds, num_decodings, attn_model: TriTransformer, beam_width=1,
+                           latents_file=None):
     # Get random seeds from test data
     with h5py.File(test_data_file) as dfile:
         test_SMILES = np.array(dfile['test'])
@@ -119,6 +120,7 @@ def property_distributions(test_data_file, num_seeds, num_decodings, attn_model:
         props_test[:, k] *= Ps_norms[k, 1]
         props_test[:, k] += Ps_norms[k, 0]
 
+    pst = props_test
     # Get num_seeds random points from test data
     indices = np.array(range(0, len(test_SMILES)))
     np.random.shuffle(indices)
@@ -135,45 +137,63 @@ def property_distributions(test_data_file, num_seeds, num_decodings, attn_model:
     else:
         output = lambda x, y: np.array(attn_model.beam_search(input_seq=seq, topk=beam_width, moments=[x, y]))
 
-    # progressbar
-    # decode molecules multiple times
-    output_itr = []
-    gen_props = []
-    bar_i = 0
-    widgets = [
-        ' [', progressbar.Timer(), '] ',
-        progressbar.Bar(),
-        ' (', progressbar.ETA(), ') ',
-    ]
+    # # progressbar
+    # # decode molecules multiple times
+    # output_itr = []
+    # gen_props = []
+    # bar_i = 0
+    # widgets = [
+    #     ' [', progressbar.Timer(), '] ',
+    #     progressbar.Bar(),
+    #     ' (', progressbar.ETA(), ') ',
+    # ]
+    #
+    # with progressbar.ProgressBar(maxval=num_seeds * num_decodings, widgets=widgets) as bar:
+    #     for seq in test_SMILES:
+    #         # get mean/variance
+    #         mu, logvar = attn_model.encode.predict_on_batch(np.expand_dims(seq, 0))
+    #         for dec_itr in range(num_decodings):
+    #             # c_output = output(mu,logvar)
+    #             s = output(mu, logvar)
+    #             if s.ndim > 1: s = s[:, 0]
+    #
+    #             with supress_stderr():
+    #                 for mol in s:
+    #                     # keep if unique
+    #                     if mol not in output_molecules:
+    #                         output_molecules.append(mol)
+    #                         mol = Chem.MolFromSmiles(mol)
+    #                         # mol is None if it wasn't a valid SMILES string
+    #                         if mol:
+    #                             try:
+    #                                 gen_props.append([QED(mol), LogP(mol), MolWt(mol), SAS(mol)])
+    #                             except:
+    #                                 print("Could not calculate properties for {}".format(Chem.MolToSmiles(mol)))
+    #             bar_i += 1
+    #             # print(bar_i)
+    #             bar.update(bar_i)
+    #
+    # print("Generated {} unique sequences, of which {} were valid.".format(len(output_molecules), len(gen_props)))
 
-    with progressbar.ProgressBar(maxval=num_seeds * num_decodings, widgets=widgets) as bar:
-        for seq in test_SMILES:
-            # get mean/variance
-            mu, logvar = attn_model.encode.predict_on_batch(np.expand_dims(seq, 0))
-            for dec_itr in range(num_decodings):
-                # c_output = output(mu,logvar)
-                s = output(mu, logvar)
-                if s.ndim > 1: s = s[:, 0]
+    if latents_file:
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        sns.set()
 
-                with supress_stderr():
-                    for mol in s:
-                        # keep if unique
-                        if mol not in output_molecules:
-                            output_molecules.append(mol)
-                            mol = Chem.MolFromSmiles(mol)
-                            # mol is None if it wasn't a valid SMILES string
-                            if mol:
-                                try:
-                                    gen_props.append([QED(mol), LogP(mol), MolWt(mol), SAS(mol)])
-                                except:
-                                    print("Could not calculate properties for {}".format(Chem.MolToSmiles(mol)))
-                bar_i += 1
-                # print(bar_i)
-                bar.update(bar_i)
+        from distutils.spawn import find_executable
 
-    print("Generated {} unique sequences, of which {} were valid.".format(len(output_molecules), len(gen_props)))
+        prop_labels = ["QED", "LogP", "MolWt", "SAS"]
+        with h5py.File(latents_file) as dfile:
+            z_test = np.array(dfile['z_test'])
+            for k in range(len(prop_labels)):
+                plt.scatter(z_test[:, 0], z_test[:, 1], c=pst[:, k], markersize=1)
+                plt.xlabel("z_0")
+                plt.ylabel("z_1")
+                plt.title(prop_labels[k])
+                plt.show()
 
-    return np.array(gen_props), props_test, len(gen_props) / len(output_molecules)
+    return 0, 0, 0
+    # return np.array(gen_props), props_test, len(gen_props) / len(output_molecules)
 
 
 def main():
@@ -213,7 +233,7 @@ def main():
             dfile.create_dataset('z_train', data=z_train)
 
     print("KURTOSIS:")
-    latent_distributions(model_dir + 'latents.h5', plot_kd=True)
+    # latent_distributions(model_dir + 'latents.h5', plot_kd=True)
 
     # Test random molecule
     print("Example decodings with ibruprofen (beam width = 5):")
@@ -229,7 +249,8 @@ def main():
                                                                num_seeds=args.n_seeds,
                                                                num_decodings=args.n_decodings,
                                                                attn_model=model,
-                                                               beam_width=args.beam_width)
+                                                               beam_width=args.beam_width,
+                                                               latents_file=model_dir+'latents.h5')
     prop_labels = ["QED", "LogP", "MolWt", "SAS"]
     print("\tValid mols:\t {:.2f}".format(frac_valid))
     for k in range(len(prop_labels)):
@@ -239,8 +260,11 @@ def main():
         print("\t\tData:\t {:.2f} ± {:.2f}".format(np.mean(gen_dat), np.std(gen_dat)))
         print("\t\tGen:\t {:.2f} ± {:.2f}".format(np.mean(dat), np.std(dat)))
 
+
 def delete_if_exists(filename):
     if exists(filename):
         os.remove(filename)
+
+
 if __name__ == '__main__':
     main()

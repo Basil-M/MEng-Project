@@ -383,7 +383,7 @@ class InterimDecoder():
                 z_logvar = z_logvar[:, :self.latent_dim]
                 z = z[:, :self.latent_dim]
 
-            return [z_mean, z_logvar, z]
+            return [z_mean, z_logvar, K.reshape(z, [-1, self.latent_dim])]
 
         return Lambda(the_loop)([mean_init, var_init, z_init])
 
@@ -636,6 +636,7 @@ class InterimDecoder2():
         pos = K.cumsum(K.ones_like(x, 'int32'), 1)
         return pos * mask
 
+
 class InterimDecoder3():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
                  layers=6, decoder_width=1, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=1,
@@ -648,12 +649,13 @@ class InterimDecoder3():
         self.width = decoder_width
 
         # Calculate means/variances from output
-        fin_length = np.ceil(self.latent_dim/decoder_width)
-        self.mean_layer = Dense(self.latent_dim, input_shape=(d_model*fin_length,), name='ID3_mean_layer')
-        self.logvar_layer = Dense(self.latent_dim, input_shape=(d_model*fin_length,), name='ID3_logvar_layer')
-
+        fin_length = np.ceil(self.latent_dim / decoder_width)
+        self.mean_layer = Dense(self.latent_dim, input_shape=(d_model * fin_length,), name='ID3_mean_layer')
+        self.logvar_layer = Dense(self.latent_dim, input_shape=(d_model * fin_length,), name='ID3_logvar_layer')
+        self.query_layer = TimeDistributed(Dense(self.d_model, input_shape=(self.d_model,), name='ID3_Query'))
+        self.value_layer = TimeDistributed(Dense(self.d_model, input_shape=(self.d_model,), name='ID3_Values'))
         # For the very first vector
-        self.attn = TimeDistributed(Dense(1, input_shape=(d_model,), activation='linear'), name='ID2_ATTN')
+        self.attn = TimeDistributed(Dense(1, input_shape=(d_model,), activation='linear'), name='ID3_ATTN')
 
         self.squeeze = Lambda(lambda x: K.squeeze(x, axis=-1), name='ID2_SQUEEZE')
 
@@ -680,7 +682,7 @@ class InterimDecoder3():
                                                                enc_output.get_shape()], name='ID2_LOOP')
 
             # will generate too many latent dimensions, so clip it
-            return K.reshape(z_embedded,[-1, self.ldim*self.d_model])
+            return K.reshape(z_embedded, [-1, self.ldim * self.d_model])
             # return K.reshape(z_embedded, )
 
         z_emb = Lambda(the_loop)(z_init)
@@ -708,7 +710,7 @@ class InterimDecoder3():
 
         # Run through interim decoder
         for dec_layer in self.layers:
-            z, self_att, enc_att = dec_layer(z, enc_output)#, self_mask, enc_mask)
+            z, self_att, enc_att = dec_layer(z, enc_output)  # , self_mask, enc_mask)
             # if return_att:
             #     self_atts.append(self_att)
             #     enc_atts.append(enc_att)
@@ -716,10 +718,12 @@ class InterimDecoder3():
         # key = Lambda(lambda x: K.expand_dims(x[:, -1, :], axis=1))(z)
         key = K.expand_dims(z[:, -1, :], axis=1)
         # key = z[:, -1, :]
-        a_vals = Dot(axes=2)([enc_output, key])
-        # a_vals = Lambda(lambda x: K.reshape(x, [-1, self.d_model]))(a_vals) # [bs x length x 1]
-        a_vals = Softmax(axis=1)(a_vals/np.sqrt(self.d_model))          # [bs x length x 1]
-        z_hat = Dot(axes=1)([enc_output, a_vals]) # [bs x dmodel]
+        queries = self.query_layer(enc_output)
+        values = self.value_layer(enc_output)
+        # Attention values
+        a = Dot(axes=2)([queries, key])
+        a = Softmax(axis=1)(a / np.sqrt(self.d_model))  # [bs x length x 1]
+        z_hat = Dot(axes=1)([values, a])  # [bs x dmodel]
         z_hat = K.reshape(z_hat, [-1, 1, self.d_model])
         # z_hat = Lambda(lambda x: K.reshape(x, [-1, 1, self.d_model]))(z_hat)
         # Decoder output is also [batch_size, k, d_model]
@@ -762,6 +766,7 @@ class InterimDecoder3():
         mask = K.cast(K.not_equal(x, 0), 'int32')
         pos = K.cumsum(K.ones_like(x, 'int32'), 1)
         return pos * mask
+
 
 class FalseEmbeddings():
     def __init__(self, d_emb):
@@ -856,6 +861,7 @@ class FalseEmbeddingsNonTD():
 
         self.pos_seq = Lambda(lambda x: self.pos_emb(K.cumsum(K.ones([K.shape(x)[0], latent_len], 'int32'), 1) - 1))
         # self.pos_emb = None
+
     def __call__(self, z):
         '''
 
@@ -940,6 +946,7 @@ class FalseEmbeddingsNonTD():
 
         self.pos_seq = Lambda(lambda x: self.pos_emb(K.cumsum(K.ones([K.shape(x)[0], latent_len], 'int32'), 1) - 1))
         # self.pos_emb = None
+
     def __call__(self, z):
         '''
 
