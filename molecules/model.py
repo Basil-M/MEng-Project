@@ -141,7 +141,7 @@ class TriTransformer:
             self.encoder_to_latent = tr.AvgLatent(self.p("d_model"), self.p("latent_dim"))
         elif self.p("bottleneck") == "interim_decoder":
             latent_pos_emb = tr.Embedding(self.p("latent_dim"), self.p("ID_d_model"), trainable=False)
-            self.encoder_to_latent = tr.InterimDecoder2(self.p("ID_d_model"), self.p("ID_d_inner_hid"),
+            self.encoder_to_latent = tr.InterimDecoder3(self.p("ID_d_model"), self.p("ID_d_inner_hid"),
                                                         self.p("ID_heads"), self.p("ID_d_k"), self.p("ID_d_v"),
                                                         self.p("ID_layers"), self.p("ID_width"), self.p("dropout"),
                                                         stddev=self.stddev,

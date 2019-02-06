@@ -76,7 +76,7 @@ class AttnParams:
             "d_v": 10,
             "layers": 1,
             "dropout": 0.1,
-            "latent_dim": 128,  # 64
+            "latent_dim": 32,  # 64
             "ID_d_model": None,
             "ID_d_inner_hid": None,
             "ID_heads": None,
@@ -88,7 +88,7 @@ class AttnParams:
             "pp_epochs": 15,
             "pp_layers": 3,
             "model_arch": "TRANSFORMER",
-            "bottleneck": "average"
+            "bottleneck": "interim_decoder"
         }
 
     def get(self, param):
