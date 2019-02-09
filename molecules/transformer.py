@@ -589,7 +589,8 @@ class InterimDecoder2():
 
         # Mask the encoder output
         self_mask = None
-        enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([z_so_far, src_seq])
+        enc_mask = None
+        # enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([z_so_far, src_seq])
         # Run through interim decoder
         for dec_layer in self.layers:
             z, self_att, enc_att = dec_layer(z, enc_output, self_mask, enc_mask)

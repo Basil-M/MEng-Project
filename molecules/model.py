@@ -141,13 +141,13 @@ class TriTransformer:
             self.encoder_to_latent = tr.AvgLatent(self.p("d_model"), self.p("latent_dim"))
         elif self.p("bottleneck") == "interim_decoder":
             latent_pos_emb = tr.Embedding(self.p("latent_dim"), self.p("ID_d_model"), trainable=False)
-            self.encoder_to_latent = tr.InterimDecoder3(self.p("ID_d_model"), self.p("ID_d_inner_hid"),
-                                                       self.p("ID_heads"), self.p("ID_d_k"), self.p("ID_d_v"),
-                                                       self.p("ID_layers"), self.p("ID_width"), self.p("dropout"),
-                                                       stddev=self.stddev,
-                                                       latent_dim=self.p("latent_dim"),
-                                                       pos_emb=latent_pos_emb,
-                                                       false_emb=None)
+            self.encoder_to_latent = tr.InterimDecoder2(self.p("ID_d_model"), self.p("ID_d_inner_hid"),
+                                                        self.p("ID_heads"), self.p("ID_d_k"), self.p("ID_d_v"),
+                                                        self.p("ID_layers"), self.p("ID_width"), self.p("dropout"),
+                                                        stddev=self.stddev,
+                                                        latent_dim=self.p("latent_dim"),
+                                                        pos_emb=latent_pos_emb,
+                                                        false_emb=None)
 
         elif self.p("bottleneck") == "none":
             self.encoder_to_latent = tr.Vec2Variational(self.p("d_model"), self.p("len_limit"))
@@ -434,9 +434,11 @@ class TriTransformer:
         if moments is None:
             src_seq = self.make_src_seq_matrix(input_seq)
             z = self.encode_sample.predict_on_batch(src_seq)
-        else:
+        elif len(moments) == 2:
             mean, logvar = moments
             z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
+        else:
+            z = np.reshape(moments[0], [1, len(moments[0])])
 
         z = z.repeat(topk, 0)
 
