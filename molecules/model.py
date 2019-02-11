@@ -303,11 +303,10 @@ class TriTransformer:
 
         # WASSERSTEIN LOSS
         if self.kl_loss_var is not None:
-            if self.p("RBF_s") == 0:
+            if self.p("WAE_s") == 0 or self.p("WAE_kernel") is None:
                 print("Using variational autoencoder")
                 kl = Lambda(kl_loss, name='VariationalLoss')([z_mean, z_logvar])
             else:
-                print("Using Wasserstein autoencoder, with RBF kernel (s = {})".format(self.p("RBF_s")))
                 kl = Lambda(self.mmd_penalty, name='VariationalLoss')(z_sampled)
                 # kl = Lambda(self.wae_mmd_exact, name='VariationalLoss')([z_mean, z_logvar])
             self.metrics["kl_loss"] = kl
@@ -571,11 +570,12 @@ class TriTransformer:
         :param sample_pz:
         :return:
         '''
-        kernel = 'IMQ'
+        kernel = self.p("WAE_kernel")
+
         sample_pz = K.random_normal(shape=[self.p("batch_size"), self.p("latent_dim")], mean=0.0,
                                     stddev=self.p("stddev"),
                                     dtype=tf.float32)
-        sigma2_p = self.p("RBF_s") ** 2
+        sigma2_p = self.p("WAE_s") ** 2
         n = self.p("batch_size")
         # n = tf.cast(n, tf.int32)
         nf = float(n)  # tf.cast(n, tf.float32)
@@ -593,15 +593,13 @@ class TriTransformer:
         distances = norms_qz + tf.transpose(norms_pz) - 2. * dotprods
 
         if kernel == 'RBF':
+            print("Using RBF WAE loss (s = {})".format(self.p("WAE_s")))
             # Median heuristic for the sigma^2 of Gaussian kernel
             hs = int(half_size)  # tf.cast(half_size, tf.int32)
-            # sigma2_k = K.flatten(distances) + K.flatten(distances_qz)
             sigma2_k = tf.nn.top_k(K.flatten(distances), hs).values[hs - 1]
             sigma2_k += tf.nn.top_k(K.flatten(distances_qz), hs).values[hs - 1]
+
             # Maximal heuristic for the sigma^2 of Gaussian kernel
-            # sigma2_k = tf.nn.top_k(tf.reshape(distances_qz, [-1]), 1).values[0]
-            # sigma2_k += tf.nn.top_k(tf.reshape(distances, [-1]), 1).values[0]
-            # sigma2_k = opts['latent_space_dim'] * sigma2_p
             distances_qz /= sigma2_k
             distances_pz /= sigma2_k
             distances /= sigma2_k
@@ -613,11 +611,9 @@ class TriTransformer:
             res2 = K.exp(-0.5 * distances)
             res2 = tf.reduce_sum(res2) * 2. / (nf * nf)
             stat = res1 - res2
-        elif kernel == 'IMQ':
-            # k(x, y) = C / (C + ||x - y||^2)
-            # C = tf.nn.top_k(tf.reshape(distances, [-1]), half_size).values[half_size - 1]
-            # C += tf.nn.top_k(tf.reshape(distances_qz, [-1]), half_size).values[half_size - 1]
-            pz = 'normal'
+        elif "IMQ" in kernel:
+            pz = kernel.split("_")[1]
+            print("Using IMQ loss with {} Cbase(s = {})".format(pz, self.p("WAE_s")))
             if pz == 'normal':
                 Cbase = 2. * self.p("latent_dim") * sigma2_p
             elif pz == 'sphere':
@@ -639,7 +635,7 @@ class TriTransformer:
     def wae_mmd_exact(self, args):
         mu, logvar = args
         var = K.exp(logvar)
-        s = self.p("RBF_s")
+        s = self.p("WAE_s")
         s2 = s ** 2
         s4 = s ** 4
         prior_mu = K.zeros_like(mu)

@@ -289,7 +289,7 @@ def main():
         args.n_seeds))
 
     if args.sample_prior:
-        gen_props, frac_valid = rand_mols(rgs.n_seeds, model_params.get("latent_dim"), model, args.beam_width)
+        gen_props, frac_valid = rand_mols(args.n_seeds, model_params.get("latent_dim"), model, args.beam_width)
     else:
         gen_props, data_props, frac_valid = property_distributions(d_file.replace('.txt', '_data.h5'),
                                                                    num_seeds=args.n_seeds,

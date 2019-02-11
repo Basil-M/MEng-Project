@@ -72,9 +72,10 @@ def get_arguments():
                         help='Number of epochs to anneal over')
     parser.add_argument('--kl_max_weight', type=float, metavar='1', default=default.get("kl_max_weight"),
                         help='Maximum KL weight')
-    parser.add_argument('--RBF_s', type=float, metavar='1', default=default.get("RBF_s"),
+    parser.add_argument('--WAE_kernel', type=str, metavar="IMQ_normal", default=default.get("WAE_kernel"),
+                        help='Kernel for Wasserstein distance - options are RBF, IMQ_normal, IMQ_sphere and IMQ_uniform')
+    parser.add_argument('--WAE_s', type=float, metavar='1', default=default.get("WAE_s"),
                         help='Scale factor to use for RBF for Wasserstein fitting. If 0, will use ELBO instead (default).')
-
     parser.add_argument('--pp_weight', type=float, metavar='1.5', default=default.get("pp_weight"),
                         help='For joint optimisation: Amount to weight MSE loss of property predictor')
 

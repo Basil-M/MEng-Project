@@ -80,10 +80,11 @@ def main():
     params.set("bottleneck", "average")
     params.set("ID_width", 1)
     params.set("ID_layers", 1)
-    params.set("RBF_s", 1)
+    params.set("WAE_kernel", "IMQ_normal")
+    params.set("WAE_s", 1)
     params.set("kl_max_weight", 1)
     params.set("latent_dim", 1)
-    params.set("stddev", 0)
+    params.set("stddev", 1)
     params.set("dropout", 0.1)
     MODEL_NAME = 'SIMTEST2'
     MODELS_DIR = 'models/'
