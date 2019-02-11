@@ -64,7 +64,7 @@ class AttnParams:
             "kl_pretrain_epochs": 1,
             "kl_anneal_epochs": 3,
             "kl_max_weight": 1,
-            "RBF_s": 0,
+            "RBF_s": 10,
             "pp_weight": 0,
             "ae_trained": False,
             "batch_size": 20,

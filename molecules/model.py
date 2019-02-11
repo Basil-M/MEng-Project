@@ -131,6 +131,7 @@ class TriTransformer:
         # self.false_embedder = tr.FalseEmbeddings(d_emb=self.d_model)
         if self.p("stddev") == 0 or self.p("stddev") is None:
             self.kl_loss_var = None
+            self.stddev = 0
         else:
             self.kl_loss_var = K.variable(0.0, dtype=np.float, name='kl_loss_weight')
             self.stddev = self.p("stddev") * self.kl_loss_var / self.p("kl_max_weight")
@@ -216,7 +217,10 @@ class TriTransformer:
             z_mean, z_logvar = self.encoder_to_latent(enc_output)
 
         # sample from z_mean, z_logvar
-        z_sampled = self.sampler([z_mean, z_logvar])
+        if self.stddev is None or self.stddev == 0:
+            z_sampled = z_mean
+        else:
+            z_sampled = self.sampler([z_mean, z_logvar])
 
         # generate an 'input' sampled value so we can create a separate
         # model to decode from latent space
@@ -304,7 +308,8 @@ class TriTransformer:
                 kl = Lambda(kl_loss, name='VariationalLoss')([z_mean, z_logvar])
             else:
                 print("Using Wasserstein autoencoder, with RBF kernel (s = {})".format(self.p("RBF_s")))
-                kl = Lambda(self.wae_mmd, name='VariationalLoss')(z_sampled)
+                kl = Lambda(self.mmd_penalty, name='VariationalLoss')(z_sampled)
+                # kl = Lambda(self.wae_mmd_exact, name='VariationalLoss')([z_mean, z_logvar])
             self.metrics["kl_loss"] = kl
             losses.append(kl)
 
@@ -490,7 +495,7 @@ class TriTransformer:
         ind = np.array([i + n * ind for i in ind]).flatten().astype(dtype=np.int)
         ind = np.expand_dims(ind, axis=1)
 
-        def K_MAT2(A, B):
+        def K_MAT(A, B):
             # A = K.reshape(A, [n, self.p("latent_dim")])  # give tensorflow shape hints
             A = K.tile(A, [n, 1])
             B = K.tile(B, [n, 1])
@@ -506,7 +511,7 @@ class TriTransformer:
 
             return K.exp((-0.5 / s ** 2) * distances)
 
-        def K_MAT(A, B):
+        def K_MAT2(A, B):
             '''
 
             :param A: Matrix of size [n, D] - each row vector is sample
@@ -559,7 +564,6 @@ class TriTransformer:
 
     def mmd_penalty(self, sample_qz):
         '''
-
         :param stddev:
         :param kernel: RBF or IMQ
         :param pz: for IMQ kernel: 'normal', 'sphere' or 'uniform'
@@ -567,7 +571,7 @@ class TriTransformer:
         :param sample_pz:
         :return:
         '''
-        kernel = 'RBF'
+        kernel = 'IMQ'
         sample_pz = K.random_normal(shape=[self.p("batch_size"), self.p("latent_dim")], mean=0.0,
                                     stddev=self.p("stddev"),
                                     dtype=tf.float32)
@@ -631,3 +635,33 @@ class TriTransformer:
                 res2 = tf.reduce_sum(res2) * 2. / (nf * nf)
                 stat += res1 - res2
         return self.kl_loss_var * stat
+
+    def wae_mmd_exact(self, args):
+        mu, logvar = args
+        var = K.exp(logvar)
+        s = self.p("RBF_s")
+        s2 = s ** 2
+        s4 = s ** 4
+        prior_mu = K.zeros_like(mu)
+        prior_var = K.ones_like(var)
+
+        def expected_rbf(mx, vx, my=None, vy=None):
+            if my == None: my = mx
+            if vy == None: vy = vx
+
+            vxt = 1 / (1 / s2 + 1 / vx)
+            vyt = 1 / (1 / s2 + 1 / vy + vxt / s4)
+            myt = (my / vy - (mx * vxt) / (vx * s2)) * vyt
+
+            det = lambda x: K.sum(K.square(x), axis=1)
+            coeff = K.sqrt((det(vyt) * det(vxt)) / (det(vy) * det(vx)))
+
+            exponent = K.square(mx) * vxt / K.square(vx)
+            exponent += K.square(myt) / vyt
+            exponent -= K.square(my) / vy
+            exponent -= K.square(mx) / vx
+            return coeff * K.exp(0.5 * K.sum(exponent, axis=1))
+
+        return K.mean(expected_rbf(mu, var) +
+                      expected_rbf(prior_mu, prior_var) -
+                      2 * expected_rbf(mu, var, prior_mu, prior_var))

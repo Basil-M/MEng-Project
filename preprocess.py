@@ -26,8 +26,11 @@ def get_arguments():
                         help="Name of the column that contains the SMILES strings. Default: %s" % SMILES_COL_NAME)
     parser.add_argument('--property_column', type=str,
                         help="Name of the column that contains the property values to predict. Default: None")
-    parser.add_argument('--model_arch', type=str, metavar='N', default='TRANSFORMER',
+    parser.add_argument('--model_arch', type=str, metavar='N', default='VAE',
                         help='Model architecture to use - options are VAE, TRANSFORMER')
+    parser.add_argument('--train_frac', type=float, metavar='0.8', default=0.8,
+                        help='Fraction of data to use for training')
+
     return parser.parse_args()
 
 
@@ -72,8 +75,9 @@ def main():
 
         del data
 
+        # Get training and testing indices
         train_idx, test_idx = map(np.array,
-                                  train_test_split(structures.index, test_size=0.20))
+                                  train_test_split(structures.index, test_size=1-args.train_frac))
 
         charset = list(reduce(lambda x, y: set(y) | x, structures, set()))
 
@@ -101,6 +105,10 @@ def main():
                              (len(test_idx), 120, len(charset)),
                              apply_fn=lambda ch: np.array(map(one_hot_encoded_fn,
                                                               structures[ch])))
+
+        # calculate properties
+
+
 
         if args.property_column:
             h5f.create_dataset('property_train', data=properties[train_idx])

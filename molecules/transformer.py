@@ -534,6 +534,8 @@ class InterimDecoder2():
         # self.logvar_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_logvar_layer')
         self.mean_layer = Dense(self.latent_dim, input_shape=(self.latent_dim * d_model,), name='ID2_mean_layer')
         self.logvar_layer = Dense(self.latent_dim, input_shape=(self.latent_dim * d_model,), name='ID2_logvar_layer')
+        self.mean_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_mean_layer2')
+        self.logvar_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_logvar_layer2')
         # For the very first vector
         self.attn = TimeDistributed(Dense(self.width, input_shape=(d_model,), activation='linear'), name='ID2_ATTN')
 
@@ -562,19 +564,14 @@ class InterimDecoder2():
                                                                enc_output.get_shape()], name='ID2_LOOP')
 
             # will generate too many latent dimensions, so clip it
-            # s = Lambda(lambda x: x[:, :self.latent_dim, :],name="ID2_FINAL_SLICE")
-            # z_embedded = s(z_embedded)
             z_embedded = z_embedded[:, :self.latent_dim, :]
-            # z_embedded = K.reshape(z_embedded, [-1, self.latent_dim, self.d_model])
-            z_embedded = K.reshape(z_embedded, [-1, self.latent_dim * self.d_model])
-            return z_embedded
-            # return K.reshape(z_embedded, )
+            return K.reshape(z_embedded, [-1, self.latent_dim * self.d_model])
 
         z_emb = Lambda(the_loop)(z_init)
-        # means = self.squeeze(self.mean_layer(z_emb))
-        # logvars = self.squeeze(self.logvar_layer(z_emb))
         means = self.mean_layer(z_emb)
+        means = self.mean_layer2(means)
         logvars = self.logvar_layer(z_emb)
+        logvars = self.logvar_layer2(logvars)
         return means, logvars
 
     def compute_next_z(self, z_so_far, src_seq, enc_output):

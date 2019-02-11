@@ -72,19 +72,18 @@ class WeightAnnealer_epoch(Callback):
         # print("\tFirst training {} epochs without variational term".format(self.init_epochs))
 
     def on_epoch_begin(self, epoch, logs=None):
+        if self.weight_var is not None:
+            # weight = min(self.max_weight, self.w0 * (self.inc ** (epoch - self.init_epochs)))
+            epoch = epoch - self.init_epochs
+            if epoch < 0:
+                weight = 0
+            elif epoch >= self.epochs_to_max:
+                weight = self.max_weight
+            else:
+                weight = 0.5 * self.max_weight * (1 + np.tanh(-2.5 + 5 * epoch / self.epochs_to_max))
 
-        # weight = min(self.max_weight, self.w0 * (self.inc ** (epoch - self.init_epochs)))
-
-        epoch = epoch - self.init_epochs
-        if epoch < 0:
-            weight = 0
-        elif epoch >= self.epochs_to_max:
-            weight = self.max_weight
-        else:
-            weight = 0.5 * self.max_weight * (1 + np.tanh(-2.5 + 5 * epoch / self.epochs_to_max))
-
-        print("Current KL loss annealer weight is {}".format(weight))
-        K.set_value(self.weight_var, weight)
+            print("Current KL loss annealer weight is {}".format(weight))
+            K.set_value(self.weight_var, weight)
 
     #
     #
