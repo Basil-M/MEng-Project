@@ -195,6 +195,14 @@ def property_distributions(test_data_file, num_seeds, num_decodings, attn_model:
 
 
 def rand_mols(nseeds, latent_dim, attn_model: TriTransformer, beam_width=1):
+    '''
+
+    :param nseeds:
+    :param latent_dim:
+    :param attn_model:
+    :param beam_width:
+    :return:
+    '''
     output_molecules = []
     # define decoding function
 
@@ -247,7 +255,7 @@ def main():
     model_params.load(model_dir + "params.pkl")
 
     # Get data
-    d_file = model_params.get("d_file")
+    d_file = model_params["d_file"]
     # data = LoadList(d_file)  # List of SMILES strings
 
     tokens = MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
@@ -289,7 +297,7 @@ def main():
         args.n_seeds))
 
     if args.sample_prior:
-        gen_props, frac_valid = rand_mols(args.n_seeds, model_params.get("latent_dim"), model, args.beam_width)
+        gen_props, frac_valid = rand_mols(args.n_seeds, model_params["latent_dim"], model, args.beam_width)
     else:
         gen_props, data_props, frac_valid = property_distributions(d_file.replace('.txt', '_data.h5'),
                                                                    num_seeds=args.n_seeds,

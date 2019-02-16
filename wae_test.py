@@ -35,27 +35,6 @@ config.gpu_options.allow_growth = True
 set_session(Session(config=config))
 
 
-class epoch_track(Callback):
-    def __init__(self, params, param_filename):
-        self._params = params
-        self._filename = param_filename
-
-    def on_epoch_end(self, epoch, logs={}):
-        self._params.set("current_epoch", self._params.get("current_epoch") + 1)
-        self._params.save(self._filename)
-        return
-
-    def on_train_end(self, logs={}):
-        if not self._params.get("ae_trained"):
-            self._params.set("current_epoch", 1)
-            self._params.set("ae_trained", True)
-        self._params.save(self._filename)
-        return
-
-    def epoch(self):
-        return self._params.get("current_epoch")
-
-
 def main():
     np.random.seed(42)
 
@@ -66,26 +45,26 @@ def main():
     print("Making smiles dict")
 
     params = dd.AttnParams()
-    params.set("epochs", 15)
-    params.set("model_arch", "TRANSFORMER")
-    params.set("layers", 1)
-    params.set("d_model", 6)
-    params.set("d_inner_hid", 196)
-    params.set("d_k", 4)
-    params.set("d_v", 4)
-    params.set("heads", 4)
-    params.set("pp_weight", 1)
+    params["epochs"] = 15
+    params["model_arch"] = "TRANSFORMER"
+    params["layers"] = 3
+    params["d_model"] = 3
+    params["d_inner_hid"] = 4
+    params["d_k"] = 4
+    params["d_v"] = 4
+    params["heads"] = 3
+    params["pp_weight"] = 1.25
 
     # INTERIM DECODER
-    params.set("bottleneck", "average")
-    params.set("ID_width", 1)
-    params.set("ID_layers", 1)
-    params.set("WAE_kernel", "IMQ_normal")
-    params.set("WAE_s", 1)
-    params.set("kl_max_weight", 1)
-    params.set("latent_dim", 1)
-    params.set("stddev", 1)
-    params.set("dropout", 0.1)
+    params["bottleneck"] = "average"
+    params["ID_width"] = 1
+    params["WAE_kernel"] = "IMQ_normal"
+    params["WAE_s"] = 2
+    params["kl_max_weight"] = 10
+    params["kl_pretrain_epochs"] = 1
+    params["latent_dim"] = 1
+    params["stddev"] = 1
+    params["dropout"] = 0.1
     MODEL_NAME = 'SIMTEST2'
     MODELS_DIR = 'models/'
     MODEL_DIR = MODELS_DIR + MODEL_NAME + "/"
@@ -96,17 +75,19 @@ def main():
     mkdir(MODEL_DIR)
 
     # Process data
-    params.set("d_file", "SIMULATED")
+    params["d_file"] =  "SIMULATED"
     params.setIDparams()
     tokens = dd.TokenList(['A', 'B'])
-    dataStrs = ['AAAAAA', 'BBBBBB', 'ABABAB']
-    props = [-1, 0, 1]
-    props = np.transpose(np.tile(props, (4,1)))
+    dataStrs = ['A', 'B', 'AB', 'BA', 'AA', 'BB', 'AAB', 'BAA', 'ABA', 'AAA', 'BBB', 'ABB', 'BAB', 'BBA','AAAA','BBBB','ABBB','BABB','BBAB','BBBA','AABB','ABAB','ABBA','BABA']
 
+    ng = 6
+    num_per_batch = 50
+    num_batches_per_epoch= 500
+    dataStrs = dataStrs[:ng]
+    props = np.linspace(0, 1, len(dataStrs))
+    props = np.transpose(np.tile(props, (4, 1)))
     trainData = dd.SmilesToArray(dataStrs, tokens)
-    ng = len(trainData)
-    num_per_batch = 20
-    bs = 500 * num_per_batch
+    bs = num_batches_per_epoch* num_per_batch
     bs = np.ceil(bs / (num_per_batch * ng)) * ng * num_per_batch
     print("trainData :", np.shape(trainData))
     data_train = np.tile(trainData, (int(bs / ng), 1))
@@ -115,44 +96,40 @@ def main():
     # data_train = np.repeat(trainData, repeats=bs/ng, axis=0)
     data_test = np.tile(trainData, (num_per_batch, 1))
     props_test = np.tile(props, (num_per_batch, 1))
-    params.set("batch_size", ng * num_per_batch)
+    params["batch_size"] =  ng * num_per_batch
     from molecules.model import TriTransformer as model_arch
 
     # Set up model
     model = model_arch(tokens, params)
 
-    # Learning rate scheduler
-    lr_scheduler = LRSchedulerPerStep(params.get("d_model"),
-                                      4000)
-
-    # Model saver
-    best_model_saver = ModelCheckpoint(MODEL_DIR + "best_model.h5", save_best_only=True,
-                                       save_weights_only=True)
 
     # Learning rate scheduler
     callbacks = []
-    callbacks.append(LRSchedulerPerStep(params.get("d_model"),
+    callbacks.append(LRSchedulerPerStep(params["d_model"],
                                         4000))  # there is a warning that it is slow, however, it's ok.
 
-    param_filename = MODEL_DIR + "params.pkl"
+    # Model saver
+    callbacks.append(ModelCheckpoint(MODEL_DIR + "best_model.h5", save_best_only=True,
+                                       save_weights_only=True))
+
     model.build_models()
     model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
 
-    wa = WeightAnnealer_epoch(model.kl_loss_var,
-                              anneal_epochs=params.get("kl_anneal_epochs"),
-                              max_val=params.get("kl_max_weight"),
-                              init_epochs=params.get("kl_pretrain_epochs"))
+    callbacks.append(WeightAnnealer_epoch(model.kl_loss_var,
+                              anneal_epochs=params["kl_anneal_epochs"],
+                              max_val=params["kl_max_weight"],
+                              init_epochs=params["kl_pretrain_epochs"]))
     # Train model
     # Delete any existing datafiles containing latent representations
     if exists(MODEL_DIR + "latents.h5"):
         remove(MODEL_DIR + "latents.h5")
 
-    model.autoencoder.fit([data_train, props_train], None,
-                          batch_size=params.get("batch_size"),
-                          epochs=params.get("epochs"),
-                          validation_data=([data_test, props_test], None),
-                          callbacks=[lr_scheduler, wa, best_model_saver],
-                          shuffle=False)
+    result = model.autoencoder.fit([data_train, props_train], None,
+                                   batch_size=params["batch_size"],
+                                   epochs=params["epochs"],
+                                   validation_data=([data_test, props_test], None),
+                                   callbacks=callbacks,
+                                   shuffle=False)
 
     print("Autoencoder training complete. Loading best model.")
     model.autoencoder.load_weights(MODEL_DIR + "best_model.h5")
@@ -166,27 +143,33 @@ def main():
 
     ## PLOT THE DATA
     gauss = lambda x, mu, var: np.exp(-0.5 * ((x - mu) ** 2) / var) / np.sqrt(2 * np.pi * var)
-    x_vals = np.linspace(-5, 5, 501)
+    x_vals = np.linspace(-5, 5, 1001)
     # plot the prior
     sns.set(rc={"lines.linewidth": 1.5})
     ax = sns.lineplot(x=x_vals, y=gauss(x_vals, 0, 1), label="Prior = N(0, 1)")
     # plot the data
+    ysum = np.zeros_like(x_vals)
+    var_s = 0
+    mu_s = 0
     for idx in range(ng):
         mu_i = mu[idx][0]
         var_i = var[idx][0]
-        sns.set(rc={"lines.linewidth": 0.75})
-        print("Data point {}:\tmu = {}\tvar={}".format(dataStrs[idx], mu_i, var_i))
-        ax = sns.lineplot(x=x_vals, y=gauss(x_vals, mu_i, var_i), ax=ax, dashes=True,
+        y_i = gauss(x_vals, mu_i, var_i)
+        sns.set(rc={"lines.linewidth": 0.15})
+        print("Data point {}:\tmu = {:.2f}\tvar={:.2f}".format(dataStrs[idx], mu_i, var_i))
+        ax = sns.lineplot(x=x_vals, y=y_i, ax=ax, dashes=True,
                           label="{} = N({:.2f},{:.2f})".format(dataStrs[idx], mu_i, var_i))
+        ysum += y_i / ng
+        var_s += var_i / ng ** 2
+        mu_s += mu_i / ng
 
     # plot the sum
-    mu_s = np.mean(mu)
-    var_s = np.mean(var)
     sns.set(rc={"lines.linewidth": 1.5})
-    sns.lineplot(x=x_vals, y=gauss(x_vals, mu_s, var_s), ax=ax, label="Total = N({:.2f},{:.2f})".format(mu_s, var_s))
+    sns.lineplot(x=x_vals, y=ysum, ax=ax, label="Total: m = {:.2f}, v = {:.2f})".format(mu_s, var_s))
     print("Distribution over all data: mu = {}\tvar={}".format(mu_s, var_s))
-    plt.show()
 
+    plt.title("Val accu {:.3f}".format(np.amax(result.history['val_accu'])))
+    plt.show()
 
 if __name__ == '__main__':
     main()

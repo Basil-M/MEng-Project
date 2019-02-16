@@ -92,13 +92,13 @@ class AttnParams:
             "bottleneck": "interim_decoder"
         }
 
-    def get(self, param):
+    def __getitem__(self, param):
         if param in self._params:
             return self._params[param]
         else:
             raise Warning("Param {} unrecognised".format(param))
 
-    def set(self, param, value):
+    def __setitem__(self, param, value):
         if not value is None:
             if param in self._params:
                 self._params[param] = value
@@ -134,7 +134,7 @@ class AttnParams:
 
     def equals(self, other_params):
         for key in self._params:
-            if other_params.get(key) != self._params[key] and key not in self._training_params:
+            if other_params[key] != self._params[key] and key not in self._training_params:
                 return False
         return True
 

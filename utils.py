@@ -34,19 +34,19 @@ class epoch_track(Callback):
         self._filename = param_filename
 
     def on_epoch_end(self, epoch, logs={}):
-        self._params.set("current_epoch", self._params.get("current_epoch") + 1)
+        self._params["current_epoch"] += 1
         self._params.save(self._filename)
         return
 
     def on_train_end(self, logs={}):
-        if not self._params.get("ae_trained"):
-            self._params.set("current_epoch", 1)
-            self._params.set("ae_trained", True)
+        if not self._params["ae_trained"]:
+            self._params["current_epoch"] = 1
+            self._params["ae_trained"] = True
         self._params.save(self._filename)
         return
 
     def epoch(self):
-        return self._params.get("current_epoch")
+        return self._params["current_epoch"]
 
 
 class WeightAnnealer_epoch(Callback):

@@ -63,11 +63,11 @@ def create_model(x_train, y_train, x_test, y_test):
 
     ## PARAMETERS
     params = dd.AttnParams()
-    params.set("latent_dim", 296)
-    params.set("bottleneck", "average")
-    params.set("kl_pretrain_epochs", 1)
-    params.set("kl_anneal_epochs", 2)
-    params.set("ID_width", 4)
+    params["latent_dim"] = 296
+    params["bottleneck"] = "average"
+    params["kl_pretrain_epochs"] = 1
+    params["kl_anneal_epochs"] = 2
+    params["ID_width"] = 4
 
     # model params to change
     d_model = {{quniform(64, 512, 4)}}
@@ -76,27 +76,20 @@ def create_model(x_train, y_train, x_test, y_test):
     layers = {{quniform(1, 7, 1)}}
     warmup = {{quniform(6000, 20000, 100)}}
 
-    params.set("d_model", int(d_model))
-    params.set("d_inner_hid", int(d_inner_hid))
-    params.set("d_k", int(d_k))
-    params.set("layers", int(layers))
+    params["d_model"] = int(d_model)
+    params["d_inner_hid"] = int(d_inner_hid)
+    params["d_k"] = int(d_k)
+    params["layers"] = int(layers)
 
     # Automatically set params from above
-    params.set("d_v", params.get("d_k"))
-    params.set("heads", int(np.ceil(d_model / d_k)))
+    params["d_v"] = params["d_k"]
+    params["d_q"] = params["d_k"]
+    params["heads"] = int(np.ceil(d_model / d_k))
 
     params.setIDparams()
     # GET TOKENS
     d_file = 'data/zinc_100k.txt'
     tokens = dd.MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
-
-    cb = []
-    cb.append(LRSchedulerPerStep(params.get("d_model"), warmup=int(warmup)))
-
-    cb.append(WeightAnnealer_epoch(model.kl_loss_var,
-                                   anneal_epochs=params.get("kl_anneal_epochs"),
-                                   max_val=params.get("kl_max_weight"),
-                                   init_epochs=params.get("kl_pretrain_epochs")))
 
     # Set up model
     if N_GPUS == 1:
@@ -106,11 +99,17 @@ def create_model(x_train, y_train, x_test, y_test):
         with tf.device("/cpu:0"):
             model = TriTransformer(tokens, params)
 
+    cb = []
+    cb.append(LRSchedulerPerStep(params["d_model"], warmup=int(warmup)))
+
+    cb.append(WeightAnnealer_epoch(model.kl_loss_var,
+                                   anneal_epochs=params["kl_anneal_epochs"],
+                                   max_val=params["kl_max_weight"],
+                                   init_epochs=params["kl_pretrain_epochs"]))
+
     model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5), N_GPUS=N_GPUS)
 
-
-
-    result = model.autoencoder.fit(x_train, None, batch_size=50*N_GPUS,
+    result = model.autoencoder.fit(x_train, None, batch_size=50 * N_GPUS,
                                    epochs=3,
                                    validation_data=(x_test, None),
                                    callbacks=cb)

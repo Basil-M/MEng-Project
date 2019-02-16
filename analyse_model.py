@@ -118,7 +118,7 @@ def main():
     model_params.load(model_dir + "params.pkl")
 
     # Get data
-    d_file = model_params.get("d_file")
+    d_file = model_params["d_file"]
     data = [d for d in LoadList(d_file)]  # List of SMILES strings
     tokens = MakeSmilesDict(d_file, dict_file=d_file.replace('.txt', '_dict.txt'))
 

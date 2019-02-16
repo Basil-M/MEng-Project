@@ -106,7 +106,7 @@ class TriTransformer:
     def __init__(self, i_tokens, p, o_tokens=None):
         self.i_tokens = i_tokens
         # self.params = p
-        self.p = lambda param: p.get(param)
+        self.p = p
 
         if o_tokens is None:
             # Autoencoder
@@ -116,71 +116,71 @@ class TriTransformer:
         self.src_loc_info = True
         self.decode = None
 
-        self.pp_layers = self.p("pp_layers")
-        d_emb = self.p("d_model")
+        self.pp_layers = self.p["pp_layers"]
+        d_emb = self.p["d_model"]
 
-        pos_emb = tr.Embedding(self.p("len_limit"), d_emb, trainable=False,
-                               weights=[tr.GetPosEncodingMatrix(self.p("len_limit"), d_emb)])
+        pos_emb = tr.Embedding(self.p["len_limit"], d_emb, trainable=False,
+                               weights=[tr.GetPosEncodingMatrix(self.p["len_limit"], d_emb)])
         i_word_emb = tr.Embedding(i_tokens.num(), d_emb)
         o_word_emb = i_word_emb
 
-        self.encoder = tr.Encoder(self.p("d_model"), self.p("d_inner_hid"), self.p("heads"), self.p("d_k"),
-                                  self.p("d_v"),
-                                  self.p("layers"), self.p("dropout"), word_emb=i_word_emb, pos_emb=pos_emb)
+        self.encoder = tr.Encoder(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"], self.p["d_k"],
+                                  self.p["d_v"],
+                                  self.p["layers"], self.p["dropout"], word_emb=i_word_emb, pos_emb=pos_emb)
 
         # self.false_embedder = tr.FalseEmbeddings(d_emb=self.d_model)
-        if self.p("stddev") == 0 or self.p("stddev") is None:
+        if self.p["stddev"] == 0 or self.p["stddev"] is None:
             self.kl_loss_var = None
             self.stddev = 0
         else:
             self.kl_loss_var = K.variable(0.0, dtype=np.float, name='kl_loss_weight')
-            self.stddev = self.p("stddev") * self.kl_loss_var / self.p("kl_max_weight")
+            self.stddev = self.p["stddev"] * self.kl_loss_var / self.p["kl_max_weight"]
 
-        self.false_embedder = tr.FalseEmbeddingsNonTD(d_emb=self.p("d_model"), d_latent=self.p("latent_dim"))
+        self.false_embedder = tr.FalseEmbeddingsNonTD(d_emb=self.p["d_model"], d_latent=self.p["latent_dim"])
 
-        if self.p("bottleneck") == "average":
-            self.encoder_to_latent = tr.AvgLatent(self.p("d_model"), self.p("latent_dim"))
-        elif self.p("bottleneck") == "interim_decoder":
-            latent_pos_emb = tr.Embedding(self.p("latent_dim"), self.p("ID_d_model"), trainable=False)
-            self.encoder_to_latent = tr.InterimDecoder2(self.p("ID_d_model"), self.p("ID_d_inner_hid"),
-                                                        self.p("ID_heads"), self.p("ID_d_k"), self.p("ID_d_v"),
-                                                        self.p("ID_layers"), self.p("ID_width"), self.p("dropout"),
+        if self.p["bottleneck"] == "average":
+            self.encoder_to_latent = tr.AvgLatent(self.p["d_model"], self.p["latent_dim"])
+        elif self.p["bottleneck"] == "interim_decoder":
+            latent_pos_emb = tr.Embedding(self.p["latent_dim"], self.p["ID_d_model"], trainable=False)
+            self.encoder_to_latent = tr.InterimDecoder2(self.p["ID_d_model"], self.p["ID_d_inner_hid"],
+                                                        self.p["ID_heads"], self.p["ID_d_k"], self.p["ID_d_v"],
+                                                        self.p["ID_layers"], self.p["ID_width"], self.p["dropout"],
                                                         stddev=self.stddev,
-                                                        latent_dim=self.p("latent_dim"),
+                                                        latent_dim=self.p["latent_dim"],
                                                         pos_emb=latent_pos_emb,
                                                         false_emb=None)
 
-        elif self.p("bottleneck") == "none":
-            self.encoder_to_latent = tr.Vec2Variational(self.p("d_model"), self.p("len_limit"))
+        elif self.p["bottleneck"] == "none":
+            self.encoder_to_latent = tr.Vec2Variational(self.p["d_model"], self.p["len_limit"])
 
         # Sample from latent space
         def sampling(args):
             z_mean_, z_logvar_ = args
-            if self.p("stddev") is None or self.p("stddev") == 0:
+            if self.p["stddev"] is None or self.p["stddev"] == 0:
                 return z_mean_
             else:
-                if self.p("bottleneck") == "none":
-                    latent_shape = (K.shape(z_mean_)[0], K.shape(z_mean_)[1], self.p("d_model"))
+                if self.p["bottleneck"] == "none":
+                    latent_shape = (K.shape(z_mean_)[0], K.shape(z_mean_)[1], self.p["d_model"])
                 else:
-                    latent_shape = (K.shape(z_mean_)[0], self.p("latent_dim"))
+                    latent_shape = (K.shape(z_mean_)[0], self.p["latent_dim"])
 
                 epsilon = K.random_normal(shape=latent_shape, mean=0., stddev=self.stddev)
                 return z_mean_ + K.exp(z_logvar_ / 2) * epsilon
 
         self.sampler = Lambda(sampling)
-        self.decoder = tr.DecoderFromLatent(self.p("d_model"), self.p("d_inner_hid"), self.p("heads"), self.p("d_k"),
-                                            self.p("d_v"),
-                                            self.p("layers"), self.p("dropout"),
+        self.decoder = tr.DecoderFromLatent(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"], self.p["d_k"],
+                                            self.p["d_v"],
+                                            self.p["layers"], self.p["dropout"],
                                             word_emb=o_word_emb, pos_emb=pos_emb)
         self.target_layer = TimeDistributed(Dense(o_tokens.num(), use_bias=False))
         # self.target_softmax = Softmax()
 
-        if self.p("pp_weight") == 0 or self.p("pp_weight") is None:
+        if self.p["pp_weight"] == 0 or self.p["pp_weight"] is None:
             self.pp_loss_var = None
             print("Not joint training property encoder")
         else:
-            self.pp_loss_var = K.variable(self.p("pp_weight"), dtype=np.float, name='pp_loss_weight')
-            print("Joint training property encoder with PP weight {}".format(self.p("pp_weight")))
+            self.pp_loss_var = K.variable(self.p["pp_weight"], dtype=np.float, name='pp_loss_weight')
+            print("Joint training property encoder with PP weight {}".format(self.p["pp_weight"]))
 
         self.metrics = {}
 
@@ -210,7 +210,7 @@ class TriTransformer:
         enc_output = debugPrint(enc_output, "ENC_OUTPUT")
 
         # variational bottleneck produces [bs x latent_dim]
-        if self.p("bottleneck") == "interim_decoder":
+        if self.p["bottleneck"] == "interim_decoder":
             # z_mean, z_logvar, z_sampled = self.encoder_to_latent(src_seq, enc_output) # for ID1
             z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)  # everything else
         else:
@@ -224,10 +224,10 @@ class TriTransformer:
 
         # generate an 'input' sampled value so we can create a separate
         # model to decode from latent space
-        if self.p("bottleneck") == "none":
-            z_input = Input(shape=(None, self.p("d_model")), dtype='float32', name='z_input')
+        if self.p["bottleneck"] == "none":
+            z_input = Input(shape=(None, self.p["d_model"]), dtype='float32', name='z_input')
         else:
-            z_input = Input(shape=(self.p("latent_dim"),), dtype='float32', name='z_input')
+            z_input = Input(shape=(self.p["latent_dim"],), dtype='float32', name='z_input')
 
         # must calculate for both a latent input and the full end-to-end system
         final_output = []
@@ -250,11 +250,11 @@ class TriTransformer:
             final_output.append(self.target_layer(dec_output))
 
         # Property prediction
-        if self.p("latent_dim") is None:
-            latent_dim = self.p("d_model") * self.p("len_limit")
-            latent_vec = Input(shape=(self.p("d_model"), self.p("len_limit"),), dtype='float', name='latent_rep')
+        if self.p["latent_dim"] is None:
+            latent_dim = self.p["d_model"] * self.p["len_limit"]
+            latent_vec = Input(shape=(self.p["d_model"], self.p["len_limit"],), dtype='float', name='latent_rep')
         else:
-            latent_dim = self.p("latent_dim")
+            latent_dim = self.p["latent_dim"]
             latent_vec = Input(shape=[latent_dim], dtype='float', name='latent_rep')
 
         if self.pp_loss_var is not None:
@@ -264,7 +264,7 @@ class TriTransformer:
         h = Dense(latent_dim, input_shape=(latent_dim,), activation='linear')(latent_vec)
         num_props = 4
         prop_input = Input(shape=[num_props])
-        for _ in range(self.p("pp_layers") - 1):
+        for _ in range(self.p["pp_layers"] - 1):
             h = Dense(latent_dim, activation='linear')(h)
         prop_output = Dense(num_props, activation='linear')(h)
 
@@ -303,14 +303,16 @@ class TriTransformer:
 
         # WASSERSTEIN LOSS
         if self.kl_loss_var is not None:
-            if self.p("WAE_s") == 0 or self.p("WAE_kernel") is None:
+            if self.p["WAE_s"] == 0 or self.p["WAE_kernel"] is None:
                 print("Using variational autoencoder")
                 kl = Lambda(kl_loss, name='VariationalLoss')([z_mean, z_logvar])
             else:
                 kl = Lambda(self.mmd_penalty, name='VariationalLoss')(z_sampled)
                 # kl = Lambda(self.wae_mmd_exact, name='VariationalLoss')([z_mean, z_logvar])
+                kl2 = Lambda(lambda x: 0.01* tf.reduce_mean(K.square(x)))(z_logvar)
             self.metrics["kl_loss"] = kl
             losses.append(kl)
+            # losses.append(kl2)
 
         # PROPERTY PREDICTION LOSS
         if self.pp_loss_var is not None:
@@ -384,7 +386,7 @@ class TriTransformer:
 
     def decode_sequence(self, input_seq, delimiter='', moments=None):
         # First get the latent representation
-        target_seq = np.zeros((1, self.p("len_limit")), dtype='int32')
+        target_seq = np.zeros((1, self.p["len_limit"]), dtype='int32')
         target_seq[0, 0] = self.o_tokens.startid()
 
         decoded_tokens = []
@@ -396,7 +398,7 @@ class TriTransformer:
             mean, logvar = moments
             z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
 
-        for i in range(self.p("len_limit") - 1):
+        for i in range(self.p["len_limit"] - 1):
             output = self.decode.predict_on_batch([z, target_seq])
             sampled_index = np.argmax(output[0, i, :])
             sampled_token = self.o_tokens.token(sampled_index)
@@ -413,7 +415,7 @@ class TriTransformer:
         :return: output sequence as a string
         '''
         decoded_tokens = []
-        target_seq = np.zeros((1, self.p("len_limit")), dtype='int32')
+        target_seq = np.zeros((1, self.p["len_limit"]), dtype='int32')
         target_seq[0, 0] = self.o_tokens.startid()
 
         # If mean/variance not provided, calculate
@@ -424,7 +426,7 @@ class TriTransformer:
             mean, logvar = moments
             z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
 
-        for i in range(self.p("len_limit") - 1):
+        for i in range(self.p["len_limit"] - 1):
             output = self.decode.predict_on_batch([z, target_seq])
             sampled_index = np.argmax(output[0, i, :])
             sampled_token = self.o_tokens.token(sampled_index)
@@ -450,10 +452,10 @@ class TriTransformer:
         decoded_tokens = [[] for _ in range(topk)]
         decoded_logps = [0] * topk
         lastk = 1
-        target_seq = np.zeros((topk, self.p("len_limit")), dtype='int32')
+        target_seq = np.zeros((topk, self.p["len_limit"]), dtype='int32')
         target_seq[:, 0] = self.o_tokens.startid()
 
-        for i in range(self.p("len_limit") - 1):
+        for i in range(self.p["len_limit"] - 1):
             if lastk == 0 or len(final_results) > topk * 3: break
             output = self.decode.predict_on_batch([z, target_seq])
             output = np.exp(output[:, i, :])
@@ -482,20 +484,20 @@ class TriTransformer:
         return final_results
 
     def wae_mmd(self, sample_qz):
-        sample_pz = K.random_normal(shape=[self.p("batch_size"), self.p("latent_dim")], mean=0.0,
-                                    stddev=self.p("stddev"),
+        sample_pz = K.random_normal(shape=[self.p["batch_size"], self.p["latent_dim"]], mean=0.0,
+                                    stddev=self.p["stddev"],
                                     dtype=tf.float32)
 
         s = 10
         # batch size
-        n = int(self.p("batch_size"))
+        n = int(self.p["batch_size"])
 
         ind = np.linspace(0, n - 1, n)
         ind = np.array([i + n * ind for i in ind]).flatten().astype(dtype=np.int)
         ind = np.expand_dims(ind, axis=1)
 
         def K_MAT(A, B):
-            # A = K.reshape(A, [n, self.p("latent_dim")])  # give tensorflow shape hints
+            # A = K.reshape(A, [n, self.p["latent_dim"]])  # give tensorflow shape hints
             A = K.tile(A, [n, 1])
             B = K.tile(B, [n, 1])
 
@@ -570,13 +572,13 @@ class TriTransformer:
         :param sample_pz:
         :return:
         '''
-        kernel = self.p("WAE_kernel")
+        kernel = self.p["WAE_kernel"]
 
-        sample_pz = K.random_normal(shape=[self.p("batch_size"), self.p("latent_dim")], mean=0.0,
-                                    stddev=self.p("stddev"),
+        sample_pz = K.random_normal(shape=[self.p["batch_size"], self.p["latent_dim"]], mean=0.0,
+                                    stddev=self.p["stddev"],
                                     dtype=tf.float32)
-        sigma2_p = self.p("WAE_s") ** 2
-        n = self.p("batch_size")
+        sigma2_p = self.p["WAE_s"] ** 2
+        n = self.p["batch_size"]
         # n = tf.cast(n, tf.int32)
         nf = float(n)  # tf.cast(n, tf.float32)
         half_size = (n * n - n) / 2
@@ -593,7 +595,7 @@ class TriTransformer:
         distances = norms_qz + tf.transpose(norms_pz) - 2. * dotprods
 
         if kernel == 'RBF':
-            print("Using RBF WAE loss (s = {})".format(self.p("WAE_s")))
+            print("Using RBF WAE loss (s = {})".format(self.p["WAE_s"]))
             # Median heuristic for the sigma^2 of Gaussian kernel
             hs = int(half_size)  # tf.cast(half_size, tf.int32)
             sigma2_k = tf.nn.top_k(K.flatten(distances), hs).values[hs - 1]
@@ -613,13 +615,13 @@ class TriTransformer:
             stat = res1 - res2
         elif "IMQ" in kernel:
             pz = kernel.split("_")[1]
-            print("Using IMQ loss with {} Cbase(s = {})".format(pz, self.p("WAE_s")))
+            print("Using IMQ loss with {} Cbase(s = {})".format(pz, self.p["WAE_s"]))
             if pz == 'normal':
-                Cbase = 2. * self.p("latent_dim") * sigma2_p
+                Cbase = 2. * self.p["latent_dim"] * sigma2_p
             elif pz == 'sphere':
                 Cbase = 2.
             elif pz == 'uniform':
-                Cbase = self.p("latent_dim")
+                Cbase = self.p["latent_dim"]
             stat = 0.
             for scale in [.1, .2, .5, 1., 2., 5., 10.]:
                 C = Cbase * scale
@@ -630,12 +632,13 @@ class TriTransformer:
                 res2 = C / (C + distances)
                 res2 = tf.reduce_sum(res2) * 2. / (nf * nf)
                 stat += res1 - res2
+
         return self.kl_loss_var * stat
 
     def wae_mmd_exact(self, args):
         mu, logvar = args
         var = K.exp(logvar)
-        s = self.p("WAE_s")
+        s = self.p["WAE_s"]
         s2 = s ** 2
         s4 = s ** 4
         prior_mu = K.zeros_like(mu)
@@ -649,7 +652,7 @@ class TriTransformer:
             vyt = 1 / (1 / s2 + 1 / vy + vxt / s4)
             myt = (my / vy - (mx * vxt) / (vx * s2)) * vyt
 
-            det = lambda x: K.sum(K.square(x), axis=1)
+            det = lambda x: K.prod(x, axis=1)
             coeff = K.sqrt((det(vyt) * det(vxt)) / (det(vy) * det(vx)))
 
             exponent = K.square(mx) * vxt / K.square(vx)
