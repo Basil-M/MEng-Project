@@ -90,7 +90,8 @@ class AttnParams:
             "ID_d_v": None,
             "ID_layers": None,
             "ID_width": 4,
-            "pp_layers": 3
+            "pp_layers": 3,
+            "num_params": None
         }
 
     def __getitem__(self, param):

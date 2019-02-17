@@ -36,7 +36,6 @@ class epoch_track(Callback):
         if models_dir:
             self.csv_filename = models_dir + "runs.csv"
             self.rownum, _ = params.dumpToCSV(self.csv_filename)
-            print("ROWNUM IS ", self.rownum)
         else:
             self.csv_filename = None
 

@@ -11,7 +11,6 @@ from os import mkdir, remove
 import tensorflow as tf
 from keras import backend as k
 
-
 from utils import epoch_track, WeightAnnealer_epoch, load_dataset
 
 config = tf.ConfigProto()
@@ -185,9 +184,8 @@ def main():
         params = dd.AttnParams()
 
         # Process data
-        params["d_file"] =  args.data
+        params["d_file"] = args.data
         d_file = args.data
-        # tokens = dd.MakeSmilesDict(d_file, dict_file=d_file.replace('.txt', '_dict.txt'))
         tokens = dd.MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
 
         # Get training and test data from data file
@@ -267,12 +265,14 @@ def main():
                 model = model_arch(tokens, params)
                 model.build_models()
 
+        # Calculate number of params
+        params["num_params"] = model.autoencoder.count_params()
+        print("Number of parameters: {}".format(params["num_params"]))
         # Learning rate scheduler
         callbacks = []
         callbacks.append(LRSchedulerPerStep(params["d_model"],
                                             int(
                                                 4 / args.base_lr)))  # there is a warning that it is slow, however, it's ok.
-
 
         # Model saver
         callbacks.append(ModelCheckpoint(MODEL_DIR + "model.h5", save_best_only=False,
@@ -335,7 +335,7 @@ def main():
                         train = [data_train, props_train]
                         test = [data_test, props_test]
                     print("Not using generator for data.")
-                    model.autoencoder.fit(train, None, batch_size=args.batch_size*N_GPUS,
+                    model.autoencoder.fit(train, None, batch_size=args.batch_size * N_GPUS,
                                           epochs=args.epochs, initial_epoch=current_epoch - 1,
                                           validation_data=(test, None),
                                           callbacks=callbacks)
