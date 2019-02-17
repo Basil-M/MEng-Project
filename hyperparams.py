@@ -1,18 +1,14 @@
 from __future__ import print_function
-import numpy as np
 
+from os import getenv
+
+import numpy as np
+from hyperas import optim
+from hyperas.distributions import quniform
 from hyperopt import Trials, STATUS_OK, tpe
 
-from hyperas import optim
-
-from keras.optimizers import Adam
-from molecules.transformer import LRSchedulerPerStep
-from hyperas.distributions import quniform, choice
-from molecules.model import TriTransformer
 import dataloader as dd
-from utils import WeightAnnealer_epoch
-from os import getenv
-import tensorflow as tf
+from train import trainTransformer
 
 MODEL_ARCH = 'TRANSFORMER'
 MODEL_NAME = 'avg_model'
@@ -68,51 +64,32 @@ def create_model(x_train, y_train, x_test, y_test):
     params["kl_pretrain_epochs"] = 1
     params["kl_anneal_epochs"] = 2
     params["ID_width"] = 4
+    params["batch_size"] = 50
+    params["epochs"] = 3
 
     # model params to change
     d_model = {{quniform(64, 512, 4)}}
     d_inner_hid = {{quniform(128, 2048, 4)}}
     d_k = {{quniform(4, 100, 1)}}
     layers = {{quniform(1, 7, 1)}}
-    warmup = {{quniform(6000, 20000, 100)}}
+    # warmup = {{quniform(6000, 20000, 100)}}
 
     params["d_model"] = int(d_model)
     params["d_inner_hid"] = int(d_inner_hid)
     params["d_k"] = int(d_k)
     params["layers"] = int(layers)
-
+    params["pp_weight"] = 1.25
     # Automatically set params from above
     params["d_v"] = params["d_k"]
     params["d_q"] = params["d_k"]
     params["heads"] = int(np.ceil(d_model / d_k))
-
     params.setIDparams()
     # GET TOKENS
     d_file = 'data/zinc_100k.txt'
     tokens = dd.MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
 
-    # Set up model
-    if N_GPUS == 1:
-        model = TriTransformer(tokens, params)
-    else:
-        # Want to set model up in the CPU
-        with tf.device("/cpu:0"):
-            model = TriTransformer(tokens, params)
-
-    cb = []
-    cb.append(LRSchedulerPerStep(params["d_model"], warmup=int(warmup)))
-
-    cb.append(WeightAnnealer_epoch(model.kl_loss_var,
-                                   anneal_epochs=params["kl_anneal_epochs"],
-                                   max_val=params["kl_max_weight"],
-                                   init_epochs=params["kl_pretrain_epochs"]))
-
-    model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5), N_GPUS=N_GPUS)
-
-    result = model.autoencoder.fit(x_train, None, batch_size=50 * N_GPUS,
-                                   epochs=3,
-                                   validation_data=(x_test, None),
-                                   callbacks=cb)
+    model, result = trainTransformer(params, tokens=tokens, data_train=x_train, data_test=x_train,
+                                     callbacks=["var_anneal"])
 
     # get the highest validation accuracy of the training epochs
     validation_acc = np.amax(result.history['val_accu'])

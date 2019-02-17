@@ -1,16 +1,10 @@
 from __future__ import print_function
 
-import argparse
-import os
-import h5py
-import numpy as np
-
-from keras.optimizers import Adam
-from keras.callbacks import Callback
-from molecules.transformer import LRSchedulerPerStep, LRSchedulerPerEpoch
+from os import mkdir
 from os.path import exists
-from os import mkdir, remove
 from shutil import rmtree
+
+import numpy as np
 import tensorflow as tf
 from keras import backend as k
 
@@ -19,10 +13,10 @@ config.gpu_options.allow_growth = True
 k.tensorflow_backend.set_session(tf.Session(config=config))
 import dataloader as dd
 import matplotlib.pyplot as plt
-from utils import WeightAnnealer_epoch
-import seaborn as sns;
+import seaborn as sns
 
 sns.set()
+from train import trainTransformer
 
 ## extra imports to set GPU options
 from tensorflow import ConfigProto, Session
@@ -37,10 +31,6 @@ set_session(Session(config=config))
 
 def main():
     np.random.seed(42)
-
-    from molecules.model import TriTransformer as model_arch
-
-    from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, TensorBoard
 
     print("Making smiles dict")
 
@@ -65,7 +55,7 @@ def main():
     params["latent_dim"] = 1
     params["stddev"] = 1
     params["dropout"] = 0.1
-    MODEL_NAME = 'SIMTEST2'
+    MODEL_NAME = 'wae_test'
     MODELS_DIR = 'models/'
     MODEL_DIR = MODELS_DIR + MODEL_NAME + "/"
 
@@ -75,61 +65,36 @@ def main():
     mkdir(MODEL_DIR)
 
     # Process data
-    params["d_file"] =  "SIMULATED"
+    params["d_file"] = "SIMULATED"
     params.setIDparams()
     tokens = dd.TokenList(['A', 'B'])
-    dataStrs = ['A', 'B', 'AB', 'BA', 'AA', 'BB', 'AAB', 'BAA', 'ABA', 'AAA', 'BBB', 'ABB', 'BAB', 'BBA','AAAA','BBBB','ABBB','BABB','BBAB','BBBA','AABB','ABAB','ABBA','BABA']
+    dataStrs = ['A', 'B', 'AB', 'BA', 'AA', 'BB', 'AAB', 'BAA', 'ABA', 'AAA', 'BBB', 'ABB', 'BAB', 'BBA', 'AAAA',
+                'BBBB', 'ABBB', 'BABB', 'BBAB', 'BBBA', 'AABB', 'ABAB', 'ABBA', 'BABA']
 
+    # PARAMETERS TO CHOOSE
     ng = 6
     num_per_batch = 50
-    num_batches_per_epoch= 500
+    num_batches_per_epoch = 500
+
+    ## PREPARE DATA
     dataStrs = dataStrs[:ng]
-    props = np.linspace(0, 1, len(dataStrs))
-    props = np.transpose(np.tile(props, (4, 1)))
     trainData = dd.SmilesToArray(dataStrs, tokens)
-    bs = num_batches_per_epoch* num_per_batch
+    bs = num_batches_per_epoch * num_per_batch
     bs = np.ceil(bs / (num_per_batch * ng)) * ng * num_per_batch
-    print("trainData :", np.shape(trainData))
     data_train = np.tile(trainData, (int(bs / ng), 1))
-    props_train = np.tile(props, (int(bs / ng), 1))
-    print("tiled data :", np.shape(data_train))
-    # data_train = np.repeat(trainData, repeats=bs/ng, axis=0)
     data_test = np.tile(trainData, (num_per_batch, 1))
-    props_test = np.tile(props, (num_per_batch, 1))
-    params["batch_size"] =  ng * num_per_batch
-    from molecules.model import TriTransformer as model_arch
+    params["batch_size"] = ng * num_per_batch
 
-    # Set up model
-    model = model_arch(tokens, params)
+    if params["pp_weight"]:
+        props = np.linspace(0, 1, len(dataStrs))
+        props = np.transpose(np.tile(props, (4, 1)))
+        props_train = np.tile(props, (int(bs / ng), 1))
+        props_test = np.tile(props, (num_per_batch, 1))
+        data_train = [data_train, props_train]
+        data_test = [data_test, props_test]
 
-
-    # Learning rate scheduler
-    callbacks = []
-    callbacks.append(LRSchedulerPerStep(params["d_model"],
-                                        4000))  # there is a warning that it is slow, however, it's ok.
-
-    # Model saver
-    callbacks.append(ModelCheckpoint(MODEL_DIR + "best_model.h5", save_best_only=True,
-                                       save_weights_only=True))
-
-    model.build_models()
-    model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5))
-
-    callbacks.append(WeightAnnealer_epoch(model.kl_loss_var,
-                              anneal_epochs=params["kl_anneal_epochs"],
-                              max_val=params["kl_max_weight"],
-                              init_epochs=params["kl_pretrain_epochs"]))
-    # Train model
-    # Delete any existing datafiles containing latent representations
-    if exists(MODEL_DIR + "latents.h5"):
-        remove(MODEL_DIR + "latents.h5")
-
-    result = model.autoencoder.fit([data_train, props_train], None,
-                                   batch_size=params["batch_size"],
-                                   epochs=params["epochs"],
-                                   validation_data=([data_test, props_test], None),
-                                   callbacks=callbacks,
-                                   shuffle=False)
+    model, results = trainTransformer(params=params, tokens=tokens, data_train=data_train, data_test=data_test,
+                                      callbacks=["best_checkpoint", "var_anneal"], model_dir=MODEL_DIR)
 
     print("Autoencoder training complete. Loading best model.")
     model.autoencoder.load_weights(MODEL_DIR + "best_model.h5")
@@ -168,8 +133,9 @@ def main():
     sns.lineplot(x=x_vals, y=ysum, ax=ax, label="Total: m = {:.2f}, v = {:.2f})".format(mu_s, var_s))
     print("Distribution over all data: mu = {}\tvar={}".format(mu_s, var_s))
 
-    plt.title("Val accu {:.3f}".format(np.amax(result.history['val_accu'])))
+    plt.title("Val accu {:.3f}".format(np.amax(results.history['val_accu'])))
     plt.show()
+
 
 if __name__ == '__main__':
     main()

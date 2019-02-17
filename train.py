@@ -10,7 +10,7 @@ from os.path import exists
 from os import mkdir, remove
 import tensorflow as tf
 from keras import backend as k
-
+from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, TensorBoard
 from utils import epoch_track, WeightAnnealer_epoch, load_dataset
 
 config = tf.ConfigProto()
@@ -130,17 +130,76 @@ def get_arguments():
     return parser.parse_args()
 
 
+def trainTransformer(params, tokens, data_train, data_test, model_dir=None, callbacks=None):
+    if callbacks is None:
+        callbacks = ["checkpoint", "best_checkpoint", "tensorboard", "var_anneal", "epoch_track"]
+
+    # GET NUMBER OF AVAILABLE GPUS
+    CUDA_VISIBLE_DEVICES = os.getenv('CUDA_VISIBLE_DEVICES')
+    if CUDA_VISIBLE_DEVICES is None:
+        N_GPUS = 1
+    else:
+        N_GPUS = len(CUDA_VISIBLE_DEVICES.split(","))
+
+    print("Found {} GPUs".format(N_GPUS))
+
+    from molecules.model import TriTransformer as model_arch
+
+    # Set up model
+    if N_GPUS == 1:
+        model = model_arch(tokens, params)
+        model.build_models()
+    else:
+        # Want to set model up in the CPU
+        with tf.device("/cpu:0"):
+            model = model_arch(tokens, params)
+            model.build_models()
+    model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5), N_GPUS=N_GPUS)
+    # Set up callbacks
+    # Learning rate scheduler
+    cb = []
+    for c in callbacks:
+        if c == "checkpoint":
+            cb.append(ModelCheckpoint(model_dir + "model.h5", save_best_only=False,
+                                      save_weights_only=True))
+        elif c == "best_checkpoint":
+            # Best model saver
+            cb.append(ModelCheckpoint(model_dir + "best_model.h5", save_best_only=True,
+                                      save_weights_only=True))
+        elif c == "tensorboard":
+            # Tensorboard Callback
+            cb.append(TensorBoard(log_dir=model_dir + "logdir/",
+                                  histogram_freq=0,
+                                  batch_size=params["batch_size"],
+                                  write_graph=True,
+                                  write_images=True,
+                                  update_freq='batch'))
+        elif c == "var_anneal":
+            cb.append(WeightAnnealer_epoch(model.kl_loss_var,
+                                           anneal_epochs=params["kl_anneal_epochs"],
+                                           max_val=params["kl_max_weight"],
+                                           init_epochs=params["kl_pretrain_epochs"]))
+        elif c == "epoch_track":
+            callbacks.append(epoch_track(params, param_filename=model_dir + "params.pkl", csv_track=True))
+
+    cb.append(LRSchedulerPerStep(params["d_model"],
+                                 4000))  # there is a warning that it is slow, however, it's ok.
+
+    results = model.autoencoder.fit(data_train, None, batch_size=params["batch_size"] * N_GPUS,
+                                    epochs=params["epochs"], initial_epoch=params["current_epoch"] - 1,
+                                    validation_data=(data_test, None),
+                                    callbacks=cb)
+    return model, results
+
+
 def main():
     args = get_arguments()
     np.random.seed(args.random_seed)
 
-    MODEL_DIR = args.models_dir + args.model + "/"
-
-    from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, TensorBoard
+    model_dir = args.models_dir + args.model + "/"
 
     ## VARIATIONAL AUTOENCODER
     if args.model_arch == "VAE":
-
         from molecules.model import MoleculeVAE as model_arch
         data_train, data_test, charset = load_dataset(args.data)
 
@@ -150,7 +209,7 @@ def main():
         else:
             model.create(charset, latent_rep_size=args.latent_dim)
 
-        checkpointer = ModelCheckpoint(filepath=MODEL_DIR,
+        checkpointer = ModelCheckpoint(filepath=model_dir,
                                        verbose=1,
                                        save_best_only=True)
 
@@ -169,17 +228,6 @@ def main():
             validation_data=(data_test, data_test)
         )
     else:
-
-        # GET NUMBER OF AVAILABLE GPUS
-        CUDA_VISIBLE_DEVICES = os.getenv('CUDA_VISIBLE_DEVICES')
-        if CUDA_VISIBLE_DEVICES is None:
-            N_GPUS = 1
-        else:
-            N_GPUS = len(CUDA_VISIBLE_DEVICES.split(","))
-
-        print("Found {} GPUs".format(N_GPUS))
-        print("Making smiles dict")
-
         # Get default attention parameters
         params = dd.AttnParams()
 
@@ -189,15 +237,15 @@ def main():
         tokens = dd.MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
 
         # Get training and test data from data file
-        if args.gen:
-            # Use a generator for data
-            _, _, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
-                                                              h5_file=d_file.replace('.txt', '_data.h5'))
-            gen = dd.SMILESgen(d_file.replace('.txt', '_data.h5'), args.batch_size)
-        else:
-            data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
-                                                                               h5_file=d_file.replace('.txt',
-                                                                                                      '_data.h5'))
+        # if args.gen:
+        #     # Use a generator for data
+        #     _, _, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
+        #                                                       h5_file=d_file.replace('.txt', '_data.h5'))
+        #     gen = dd.SMILESgen(d_file.replace('.txt', '_data.h5'), args.batch_size)
+        # else:
+        data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
+                                                                           h5_file=d_file.replace('.txt',
+                                                                                                  '_data.h5'))
         # Set up model
         for arg in vars(args):
             if arg in params.params:
@@ -207,12 +255,12 @@ def main():
         params.setIDparams()
 
         # Create model tracking folder
-        if not exists(MODEL_DIR):
-            mkdir(MODEL_DIR)
+        if not exists(model_dir):
+            mkdir(model_dir)
 
         # Handle parameters
         current_epoch = 1
-        param_filename = MODEL_DIR + "params.pkl"
+        param_filename = model_dir + "params.pkl"
         loaded_params = dd.AttnParams()
 
         if not exists(param_filename):
@@ -253,96 +301,16 @@ def main():
 
                 params = loaded_params
 
-        from molecules.model import TriTransformer as model_arch
-
-        # Set up model
-        if N_GPUS == 1:
-            model = model_arch(tokens, params)
-            model.build_models()
-        else:
-            # Want to set model up in the CPU
-            with tf.device("/cpu:0"):
-                model = model_arch(tokens, params)
-                model.build_models()
-
-        # Calculate number of params
-        params["num_params"] = model.autoencoder.count_params()
-        print("Number of parameters: {}".format(params["num_params"]))
-        # Learning rate scheduler
-        callbacks = []
-        callbacks.append(LRSchedulerPerStep(params["d_model"],
-                                            int(
-                                                4 / args.base_lr)))  # there is a warning that it is slow, however, it's ok.
-
-        # Model saver
-        callbacks.append(ModelCheckpoint(MODEL_DIR + "model.h5", save_best_only=False,
-                                         save_weights_only=True))
-
-        # Best model saver
-        callbacks.append(ModelCheckpoint(MODEL_DIR + "best_model.h5", save_best_only=True,
-                                         save_weights_only=True))
-
-        # Tensorboard Callback
-        callbacks.append(TensorBoard(log_dir=MODEL_DIR + "logdir/",
-                                     histogram_freq=0,
-                                     batch_size=args.batch_size,
-                                     write_graph=True,
-                                     write_images=True,
-                                     update_freq='batch'))
-
-        if args.bottleneck == "none":
-            model.compile_vae(Adam(args.base_lr, 0.9, 0.98), N_GPUS=N_GPUS)
-        else:
-            # avoid exploding gradients
-            model.compile_vae(Adam(args.base_lr, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5), N_GPUS=N_GPUS)
-
-        try:
-            model.autoencoder.load_weights(MODEL_DIR + "model.h5")
-        except:
-            print("New model.")
-            params.save(param_filename)
-
-        # Set up epoch tracking callback
-        callbacks.append(epoch_track(params, param_filename=param_filename, models_dir=args.models_dir))
-        current_epoch = params["current_epoch"]
-        # Weight annealer callback
-        if params["stddev"] != 0 and params["stddev"] is not None:
-            callbacks.append(WeightAnnealer_epoch(model.kl_loss_var,
-                                                  anneal_epochs=params["kl_anneal_epochs"],
-                                                  max_val=params["kl_max_weight"],
-                                                  init_epochs=params["kl_pretrain_epochs"]))
-
         # Train model
-        try:
-            if not params["ae_trained"]:
-                print("Training autoencoder.")
+        if params["pp_weight"] == 0 or params["pp_weight"] is None:
+            data_train = data_train
+            data_test = data_test
+        else:
+            data_train = [data_train, props_train]
+            data_test = [data_test, props_test]
 
-                # Delete any existing datafiles containing latent representations
-                if exists(MODEL_DIR + "latents.h5"):
-                    remove(MODEL_DIR + "latents.h5")
-
-                if args.gen and params["pp_weight"] == 0.0:
-                    print("Using generator for data!")
-                    model.autoencoder.fit_generator(gen.train_data, None,
-                                                    epochs=args.epochs, initial_epoch=current_epoch - 1,
-                                                    validation_data=gen.test_data,
-                                                    callbacks=callbacks)
-                else:
-                    if params["pp_weight"] == 0.0:
-                        train = data_train
-                        test = data_test
-                    else:
-                        train = [data_train, props_train]
-                        test = [data_test, props_test]
-                    print("Not using generator for data.")
-                    model.autoencoder.fit(train, None, batch_size=args.batch_size * N_GPUS,
-                                          epochs=args.epochs, initial_epoch=current_epoch - 1,
-                                          validation_data=(test, None),
-                                          callbacks=callbacks)
-
-        except KeyboardInterrupt:
-            # print("Interrupted on epoch {}".format(ep_track.epoch()))
-            print("Training interrupted.")
+        model, results = trainTransformer(params=params, data_train=data_train, data_test=data_test, tokens=tokens,
+                                          model_dir=model_dir)
 
 
 if __name__ == '__main__':

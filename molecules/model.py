@@ -1,18 +1,18 @@
-import copy
 import tensorflow as tf
 import numpy as np
-
+import tensorflow as tf
 from keras import backend as K
 from keras import objectives
-from keras.models import Model
-from keras.layers import Input, Dense, Lambda, Softmax
-from keras.layers.core import Dense, Activation, Flatten, RepeatVector
-from keras.layers.wrappers import TimeDistributed
-from keras.layers.recurrent import GRU
+from keras.layers import Input, Lambda
 from keras.layers.convolutional import Convolution1D
+from keras.layers.core import Dense, Flatten, RepeatVector
+from keras.layers.recurrent import GRU
+from keras.layers.wrappers import TimeDistributed
+from keras.models import Model
+from keras.utils.training_utils import multi_gpu_model
+
 import molecules.transformer as tr
 from molecules.transformer import debugPrint
-from keras.utils.training_utils import multi_gpu_model
 
 
 class MoleculeVAE():
@@ -308,7 +308,7 @@ class TriTransformer:
             else:
                 kl = Lambda(self.mmd_penalty, name='VariationalLoss')(z_sampled)
                 # kl = Lambda(self.wae_mmd_exact, name='VariationalLoss')([z_mean, z_logvar])
-                kl2 = Lambda(lambda x: 0.01* tf.reduce_mean(K.square(x)))(z_logvar)
+                kl2 = Lambda(lambda x: 0.01 * tf.reduce_mean(K.square(x)))(z_logvar)
             self.metrics["kl_loss"] = kl
             losses.append(kl)
             # losses.append(kl2)

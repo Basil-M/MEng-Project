@@ -1,7 +1,7 @@
-from keras.layers import *
+import tensorflow as tf
 from keras.callbacks import *
 from keras.initializers import *
-import tensorflow as tf
+from keras.layers import *
 
 # try:
 #     from dataloader import TokenList, pad_to_longest
@@ -832,7 +832,7 @@ class FalseEmbeddingsNonTD():
         :param d_emb: dimensionality of false embeddings
         '''
         NUM_LAYERS = 0
-        latent_len = int(np.ceil(d_latent/d_emb)*d_emb)
+        latent_len = int(np.ceil(d_latent / d_emb) * d_emb)
         self.init_layer = Dense(d_emb * latent_len, input_shape=(d_latent,))
 
         # self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,)))

@@ -3,6 +3,7 @@ import h5py
 import numpy as np
 from keras.callbacks import Callback
 from keras import backend as K
+from os.path import dirname, exists
 
 
 def FreqDict2List(dt):
@@ -29,11 +30,13 @@ class epoch_track(Callback):
     And updates the pickled Params file in the model directory
     '''
 
-    def __init__(self, params, param_filename, models_dir=None):
+    def __init__(self, params, param_filename, csv_track=False):
         super().__init__()
         self._params = params
         self._filename = param_filename
-        if models_dir:
+        if csv_track:
+            models_dir = dirname(dirname(param_filename))
+            print(models_dir)
             self.csv_filename = models_dir + "runs.csv"
             self.rownum, _ = params.dumpToCSV(self.csv_filename)
         else:
@@ -42,7 +45,7 @@ class epoch_track(Callback):
     def on_epoch_end(self, epoch, logs={}):
         self._params["current_epoch"] += 1
         self._params.save(self._filename)
-        epoch +=1
+        epoch += 1
         if self.csv_filename is not None:
             # load csv
             arr = np.genfromtxt(self.csv_filename, delimiter=",", dtype=str)
@@ -204,7 +207,7 @@ def readFragmentScores(name='fpscores'):
     global _fscores
     # generate the full path filename:
     if name == "fpscores":
-        name = op.join(op.dirname(__file__), name)
+        name = op.join(op.dirname(__file__), name) + "/"
     _fscores = cPickle.load(gzip.open('%s.pkl.gz' % name))
     outDict = {}
     for i in _fscores:

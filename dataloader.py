@@ -1,20 +1,16 @@
-import os, sys, time, random
+import os
+import pickle
 
-from typing import Dict, Any, Union
-
-import utils
 import h5py
 import numpy as np
-import time
-import csv
-import pickle
-from rdkit import Chem
-from rdkit.Chem.Descriptors import MolWt
-from rdkit.Chem.Crippen import MolLogP as LogP
-from rdkit.Chem.QED import qed as QED
-from utils import calculateScore as SAS
-
 from keras.utils import Sequence
+from rdkit import Chem
+from rdkit.Chem.Crippen import MolLogP as LogP
+from rdkit.Chem.Descriptors import MolWt
+from rdkit.Chem.QED import qed as QED
+
+import utils
+from utils import calculateScore as SAS
 
 
 class SMILESgen:
@@ -59,9 +55,9 @@ class AttnParams:
         self._training_params = ["current_epoch", "ae_trained"]
         self._params = {
             "model": None,
-            "d_file": None,         # Data stuff
+            "d_file": None,  # Data stuff
             "len_limit": 120,
-            "current_epoch": 1,     # Training params
+            "current_epoch": 1,  # Training params
             "epochs": 25,
             "ae_trained": False,
             "batch_size": 20,
@@ -73,7 +69,7 @@ class AttnParams:
             "stddev": 1,
             "pp_weight": 0,
             "pp_epochs": 15,
-            "model_arch": "TRANSFORMER",    # Model params
+            "model_arch": "TRANSFORMER",  # Model params
             "latent_dim": 32,
             "d_model": 24,
             "d_inner_hid": 196,
@@ -133,6 +129,7 @@ class AttnParams:
                 pass
             else:
                 print("\t{}  {}".format(key.ljust(m_len), self._params[key]))
+
     def dumpToCSV(self, filename):
         # Check if csv already exists
         if not os.path.exists(filename):
