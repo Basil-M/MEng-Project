@@ -58,26 +58,31 @@ class AttnParams:
     def __init__(self):
         self._training_params = ["current_epoch", "ae_trained"]
         self._params = {
-            "d_file": None,
-            "current_epoch": 1,
+            "model": None,
+            "d_file": None,         # Data stuff
+            "len_limit": 120,
+            "current_epoch": 1,     # Training params
             "epochs": 25,
+            "ae_trained": False,
+            "batch_size": 20,
             "kl_pretrain_epochs": 1,
             "kl_anneal_epochs": 3,
             "kl_max_weight": 1,
             "WAE_kernel": None,
             "WAE_s": 10,
+            "stddev": 1,
             "pp_weight": 0,
-            "ae_trained": False,
-            "batch_size": 20,
-            "len_limit": 120,
+            "pp_epochs": 15,
+            "model_arch": "TRANSFORMER",    # Model params
+            "latent_dim": 32,
             "d_model": 24,
             "d_inner_hid": 196,
-            "heads": 4,
             "d_k": 4,
             "d_v": 4,
+            "heads": 4,
             "layers": 1,
             "dropout": 0.1,
-            "latent_dim": 32,  # 64
+            "bottleneck": "average",
             "ID_d_model": None,
             "ID_d_inner_hid": None,
             "ID_heads": None,
@@ -85,11 +90,7 @@ class AttnParams:
             "ID_d_v": None,
             "ID_layers": None,
             "ID_width": 4,
-            "stddev": 1,
-            "pp_epochs": 15,
-            "pp_layers": 3,
-            "model_arch": "TRANSFORMER",
-            "bottleneck": "interim_decoder"
+            "pp_layers": 3
         }
 
     def __getitem__(self, param):
@@ -131,6 +132,27 @@ class AttnParams:
                 pass
             else:
                 print("\t{}  {}".format(key.ljust(m_len), self._params[key]))
+    def dumpToCSV(self, filename):
+        # Check if csv already exists
+        if not os.path.exists(filename):
+            arr = np.transpose(np.array(list(self._params.items())))
+            rownum = 1
+        else:
+            arr = np.genfromtxt(filename, delimiter=",", dtype=str)
+            # check if this model already exists
+            rownum = np.where(arr[:, 0] == self["model"])[0]
+            if not rownum:
+                newvals = [self._params[key] for key in self._params]
+                num_pad = np.shape(arr)[1] - len(newvals)
+                [newvals.extend("-") for _ in range(num_pad)]
+                arr = np.vstack((arr, newvals))
+                rownum = np.shape(arr)[0] - 1
+            else:
+                rownum = rownum[0]
+
+        np.savetxt(filename, arr, delimiter=",", fmt='%s')
+
+        return rownum, arr
 
     def equals(self, other_params):
         for key in self._params:

@@ -29,13 +29,40 @@ class epoch_track(Callback):
     And updates the pickled Params file in the model directory
     '''
 
-    def __init__(self, params, param_filename):
+    def __init__(self, params, param_filename, models_dir=None):
+        super().__init__()
         self._params = params
         self._filename = param_filename
+        if models_dir:
+            self.csv_filename = models_dir + "runs.csv"
+            self.rownum, _ = params.dumpToCSV(self.csv_filename)
+            print("ROWNUM IS ", self.rownum)
+        else:
+            self.csv_filename = None
 
     def on_epoch_end(self, epoch, logs={}):
         self._params["current_epoch"] += 1
         self._params.save(self._filename)
+        epoch +=1
+        if self.csv_filename is not None:
+            # load csv
+            arr = np.genfromtxt(self.csv_filename, delimiter=",", dtype=str)
+            # pad column if necessary
+            num_params = len(self._params.params)
+            if np.shape(arr)[1] < num_params + 2 * epoch:
+                padding = np.zeros((np.shape(arr)[0], num_params + 2 * epoch - np.shape(arr)[1]))
+
+                arr = np.hstack((arr, padding))
+                for e in range(epoch):
+                    arr[0, num_params + 2 * e] = "Epoch {} train accu".format(e + 1)
+                    arr[0, num_params + 2 * e + 1] = "Epoch {} val accu".format(e + 1)
+
+            # add new val/training acc
+            arr[self.rownum, num_params + 2 * epoch - 2] = logs["accu"]
+            arr[self.rownum, num_params + 2 * epoch - 1] = logs["val_accu"]
+            # save csv
+            np.savetxt(self.csv_filename, arr, delimiter=",", fmt='%s')
+
         return
 
     def on_train_end(self, logs={}):

@@ -23,11 +23,11 @@ NUM_EPOCHS = 20
 BATCH_SIZE = 50
 LATENT_DIM = 128
 RANDOM_SEED = 1403
-DATA = 'data/zinc_100k.txt'
+DATA = 'data/zinc_1k.txt'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'id8'
+MODEL_NAME = 'id_rec3'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -303,7 +303,7 @@ def main():
             params.save(param_filename)
 
         # Set up epoch tracking callback
-        callbacks.append(epoch_track(params, param_filename=param_filename))
+        callbacks.append(epoch_track(params, param_filename=param_filename, models_dir=args.models_dir))
         current_epoch = params["current_epoch"]
         # Weight annealer callback
         if params["stddev"] != 0 and params["stddev"] is not None:

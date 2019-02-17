@@ -311,9 +311,11 @@ def main():
     for k in range(len(prop_labels)):
         print("\t{}:".format(prop_labels[k]))
         gen_dat = gen_props[:, k]
-        # dat = data_props[:, k]
+
         print("\t\tGen:\t {:.2f} ± {:.2f}".format(np.mean(gen_dat), np.std(gen_dat)))
-        # print("\t\tData:\t {:.2f} ± {:.2f}".format(np.mean(dat), np.std(dat)))
+        if not args.prior_sample:
+            dat = data_props[:, k]
+            print("\t\tData:\t {:.2f} ± {:.2f}".format(np.mean(dat), np.std(dat)))
 
 
 def delete_if_exists(filename):
