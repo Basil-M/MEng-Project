@@ -634,6 +634,128 @@ class InterimDecoder2():
         pos = K.cumsum(K.ones_like(x, 'int32'), 1)
         return pos * mask
 
+# __init__
+# build
+
+class InterimDecoder2():
+    def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
+                 layers=6, decoder_width=1, dropout=0.1, word_emb=None, pos_emb=None, latent_dim=None, stddev=1,
+                 false_emb=None):
+        self.latent_dim = latent_dim
+        self.emb_layer = word_emb
+        self.pos_layer = pos_emb
+        self.d_model = d_model
+        self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
+        self.width = decoder_width
+
+        # Calculate 'decoder_width' means/variances from output
+        # self.mean_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_mean_layer')
+        # self.logvar_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_logvar_layer')
+        self.mean_layer = Dense(self.latent_dim, input_shape=(self.latent_dim * d_model,), name='ID2_mean_layer')
+        self.logvar_layer = Dense(self.latent_dim, input_shape=(self.latent_dim * d_model,), name='ID2_logvar_layer')
+        self.mean_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_mean_layer2')
+        self.logvar_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_logvar_layer2')
+        # For the very first vector
+        self.attn = TimeDistributed(Dense(self.width, input_shape=(d_model,), activation='linear'), name='ID2_ATTN')
+
+        self.squeeze = Lambda(lambda x: K.squeeze(x, axis=-1), name='ID2_SQUEEZE')
+
+        self.ldim = K.constant(latent_dim, dtype='int32')
+        self.concat = Concatenate(axis=1, name='ID2_CONCAT')
+
+    def __call__(self, src_seq, enc_output):
+        '''
+        Will iteratively compute means and variances
+        :param src_seq:
+        :param enc_output:
+        :return:
+        '''
+        z_init = self.first_iter(src_seq, enc_output)
+
+        def the_loop(args):
+            z_init_ = args
+
+            # use interim decoder to generate latent dimension iteratively
+            z_embedded, _, _ = tf.while_loop(self.cond, self.step,
+                                             [z_init_, src_seq, enc_output],
+                                             shape_invariants=[tf.TensorShape([None, None, self.d_model]),
+                                                               src_seq.get_shape(),
+                                                               enc_output.get_shape()], name='ID2_LOOP')
+
+            # will generate too many latent dimensions, so clip it
+            z_embedded = z_embedded[:, :self.latent_dim, :]
+            return K.reshape(z_embedded, [-1, self.latent_dim * self.d_model])
+
+        z_emb = Lambda(the_loop)(z_init)
+        means = self.mean_layer(z_emb)
+        means = self.mean_layer2(means)
+        logvars = self.logvar_layer(z_emb)
+        logvars = self.logvar_layer2(logvars)
+        return means, logvars
+
+    def compute_next_z(self, z_so_far, src_seq, enc_output):
+        # z is [batch_size, k]
+        # Embed to be of size [batch_size, k, d_model]
+        z = z_so_far
+
+        # Positional embedding
+        # z_pos = Lambda(self.get_pos_seq)(z_so_far)
+        # z_pos = self.pos_layer(z_pos)
+        # z = Add()([z, z_pos])
+
+        # Mask the encoder output
+        self_mask = None
+        enc_mask = None
+        # enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([z_so_far, src_seq])
+        # Run through interim decoder
+        for dec_layer in self.layers:
+            z, self_att, enc_att = dec_layer(z, enc_output, self_mask, enc_mask)
+
+        return z
+
+    def step(self, z_so_far, src_seq, enc_output):
+        '''
+        Given latent values generated so far, will generate next decoder_width
+        latent means and variances
+        :param src_seq:     Embedded source sequence
+        :param enc_output:  Output of encoder
+        :param z_so_far:    Sampled latent variables generated so far
+        :return:
+        '''
+
+        z_i = self.compute_next_z(z_so_far, src_seq, enc_output)
+        s = Lambda(lambda x: x[:, -self.width:, :], name='ID2_LOOPSTRIDE')
+        s2 = Lambda(lambda x: K.reshape(x, [-1, self.width, self.d_model]), name='ID2_LOOPSHAPE')
+        z_i = s2(s(z_i))
+        z = self.concat([z_so_far, z_i])
+
+        return [z, src_seq, enc_output]
+
+    def first_iter(self, src_seq, enc_output, return_att=False, active_layers=999):
+        # We generate the first [width] vectors using a weighted average of the encoder output
+        a_vals = self.attn(enc_output)
+        a_vals = Softmax(axis=1)(a_vals)
+        h = Dot(axes=1)([a_vals, enc_output])
+
+        # h is now [batch_size, width, d_model]
+        # The code in "step" must be run at least once
+        # Outside the loop just to make Keras happy
+        h = self.compute_next_z(h, src_seq, enc_output)
+
+        return h
+
+    def cond(self, z_so_far, src_seq, enc_output):
+        # Return true while mean length is less than latent dim
+        return tf.less(K.shape(z_so_far)[1], self.ldim)
+
+    def get_pos_seq(self, x):
+        mask = K.cast(K.not_equal(x, 0), 'int32')
+        pos = K.cumsum(K.ones_like(x, 'int32'), 1)
+        return pos * mask
+
+
+
+
 
 class InterimDecoder3():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,

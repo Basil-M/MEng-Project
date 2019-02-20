@@ -1,16 +1,11 @@
 import os
-import pickle
 
 import h5py
 import numpy as np
 from keras.utils import Sequence
-from rdkit import Chem
-from rdkit.Chem.Crippen import MolLogP as LogP
-from rdkit.Chem.Descriptors import MolWt
-from rdkit.Chem.QED import qed as QED
 
 import utils
-from utils import calculateScore as SAS
+from utils import TokenList
 
 
 class SMILESgen:
@@ -48,142 +43,6 @@ class SMILES_data(Sequence):
             np.random.shuffle(self.indices)
 
 
-class AttnParams:
-    _params = None
-
-    def __init__(self):
-        self._training_params = ["current_epoch", "ae_trained"]
-        self._params = {
-            "model": None,
-            "d_file": None,  # Data stuff
-            "len_limit": 120,
-            "current_epoch": 1,  # Training params
-            "epochs": 25,
-            "ae_trained": False,
-            "batch_size": 20,
-            "kl_pretrain_epochs": 1,
-            "kl_anneal_epochs": 3,
-            "kl_max_weight": 1,
-            "WAE_kernel": None,
-            "WAE_s": 10,
-            "stddev": 1,
-            "pp_weight": 0,
-            "pp_epochs": 15,
-            "model_arch": "TRANSFORMER",  # Model params
-            "latent_dim": 32,
-            "d_model": 24,
-            "d_inner_hid": 196,
-            "d_k": 4,
-            "d_v": 4,
-            "heads": 4,
-            "layers": 1,
-            "dropout": 0.1,
-            "bottleneck": "average",
-            "ID_d_model": None,
-            "ID_d_inner_hid": None,
-            "ID_heads": None,
-            "ID_d_k": None,
-            "ID_d_v": None,
-            "ID_layers": None,
-            "ID_width": 4,
-            "pp_layers": 3,
-            "num_params": None
-        }
-
-    def __getitem__(self, param):
-        if param in self._params:
-            return self._params[param]
-        else:
-            raise Warning("Param {} unrecognised".format(param))
-
-    def __setitem__(self, param, value):
-        if not value is None:
-            if param in self._params:
-                self._params[param] = value
-            else:
-                print("Param {} unrecognised".format(param))
-
-    def load(self, fn):
-        with open(fn, mode='rb') as f:
-            self._params = pickle.load(f)
-
-    def save(self, fn):
-        with open(fn, mode='wb') as f:
-            pickle.dump(self._params, f, pickle.HIGHEST_PROTOCOL)
-
-    def setIDparams(self):
-        # Will by default set interim decoder parameters
-        # to have same as normal parameters
-        if self._params["bottleneck"] == "interim_decoder":
-            for key in self._params:
-                if "ID" in key:
-                    if self._params[key] is None:
-                        self._params[key] = self._params[key.replace("ID_", "")]
-
-    def dump(self):
-        # get max length
-        m_len = max([len(key) for key in self._params])
-
-        for key in self._params:
-            if "ID" in key and self._params["bottleneck"] != "interim_decoder":
-                pass
-            else:
-                print("\t{}  {}".format(key.ljust(m_len), self._params[key]))
-
-    def dumpToCSV(self, filename):
-        # Check if csv already exists
-        if not os.path.exists(filename):
-            arr = np.transpose(np.array(list(self._params.items())))
-            rownum = 1
-        else:
-            arr = np.genfromtxt(filename, delimiter=",", dtype=str)
-            # check if this model already exists
-            rownum = np.where(arr[:, 0] == self["model"])[0]
-            if not rownum:
-                newvals = [self._params[key] for key in self._params]
-                num_pad = np.shape(arr)[1] - len(newvals)
-                [newvals.extend("-") for _ in range(num_pad)]
-                arr = np.vstack((arr, newvals))
-                rownum = np.shape(arr)[0] - 1
-            else:
-                rownum = rownum[0]
-
-        np.savetxt(filename, arr, delimiter=",", fmt='%s')
-
-        return rownum, arr
-
-    def equals(self, other_params):
-        for key in self._params:
-            if other_params[key] != self._params[key] and key not in self._training_params:
-                return False
-        return True
-
-    @property
-    def params(self):
-        return self._params
-
-
-class TokenList:
-    def __init__(self, token_list):
-        self.id2t = ['<PAD>', '<UNK>', '<S>', '</S>'] + token_list
-        self.t2id = {v: k for k, v in enumerate(self.id2t)}
-
-    def id(self, x):
-        return self.t2id.get(x, 1)
-
-    def token(self, x):
-        return self.id2t[x]
-
-    def num(self):
-        return len(self.id2t)
-
-    def startid(self):
-        return 2
-
-    def endid(self):
-        return 3
-
-
 def MakeSmilesDict(fn=None, min_freq=5, dict_file=None):
     if dict_file is not None and os.path.exists(dict_file):
         print('Loading preprocessed dictionary file {}'.format(dict_file))
@@ -209,55 +68,56 @@ def MakeSmilesDict(fn=None, min_freq=5, dict_file=None):
     return TokenList(lst)
 
 
-def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0.8):
-    if h5_file is not None and os.path.exists(h5_file):
-        print('Loading data from {}'.format(h5_file))
-
-        with h5py.File(h5_file) as dfile:
-            test_data, train_data = dfile['test'][:], dfile['train'][:]
-            test_pps, train_pps = dfile['test_props'][:], dfile['train_props'][:]
-    else:
-        print("Processing data from {}".format(fn))
-        data = utils.LoadList(fn)
-
-        Xs = []
-        Ps = []
-        Ps_norms = []
-        # Get structures
-        for seq in data:
-            mol = Chem.MolFromSmiles(seq)
-
-            Ps.append([QED(mol), LogP(mol), MolWt(mol), SAS(mol)])
-
-            Xs.append(seq)
-
-        # Normalise properties
-        Ps = np.array(Ps)
-        for k in range(np.shape(Ps)[1]):
-            mu = np.mean(Ps[:, k])
-            std = np.std(Ps[:, k])
-            Ps[:, k] = (Ps[:, k] - mu) / std
-            Ps_norms.append([mu, std])
-
-        # Split testing and training data
-        # TODO(Basil): Fix ugly hack with the length of Xs...
-        split_pos = int(np.floor(train_frac * np.max(np.shape(Xs))))
-
-        train_data = SmilesToArray(Xs[:split_pos], tokens, max_len)
-        train_pps = Ps[:split_pos]
-        test_data = SmilesToArray(Xs[split_pos:], tokens, max_len)
-        test_pps = Ps[split_pos:]
-
-        if h5_file is not None:
-            with h5py.File(h5_file, 'w') as dfile:
-                dfile.create_dataset('test', data=test_data)
-                dfile.create_dataset('train', data=train_data)
-                dfile.create_dataset('test_props', data=test_pps)
-                dfile.create_dataset('train_props', data=train_pps)
-                dfile.create_dataset('property_norms', data=Ps_norms)
-
-    return train_data, test_data, train_pps, test_pps
-
+#
+# def MakeSmilesData(fn=None, tokens=None, h5_file=None, max_len=200, train_frac=0.8):
+#     if h5_file is not None and os.path.exists(h5_file):
+#         print('Loading data from {}'.format(h5_file))
+#
+#         with h5py.File(h5_file) as dfile:
+#             test_data, train_data = dfile['test'][:], dfile['train'][:]
+#             test_pps, train_pps = dfile['test_props'][:], dfile['train_props'][:]
+#     else:
+#         print("Processing data from {}".format(fn))
+#         data = utils.LoadList(fn)
+#
+#         Xs = []
+#         Ps = []
+#         Ps_norms = []
+#         # Get structures
+#         for seq in data:
+#             mol = Chem.MolFromSmiles(seq)
+#
+#             Ps.append([QED(mol), LogP(mol), MolWt(mol), SAS(mol)])
+#
+#             Xs.append(seq)
+#
+#         # Normalise properties
+#         Ps = np.array(Ps)
+#         for k in range(np.shape(Ps)[1]):
+#             mu = np.mean(Ps[:, k])
+#             std = np.std(Ps[:, k])
+#             Ps[:, k] = (Ps[:, k] - mu) / std
+#             Ps_norms.append([mu, std])
+#
+#         # Split testing and training data
+#         # TODO(Basil): Fix ugly hack with the length of Xs...
+#         split_pos = int(np.floor(train_frac * np.max(np.shape(Xs))))
+#
+#         train_data = SmilesToArray(Xs[:split_pos], tokens, max_len)
+#         train_pps = Ps[:split_pos]
+#         test_data = SmilesToArray(Xs[split_pos:], tokens, max_len)
+#         test_pps = Ps[split_pos:]
+#
+#         if h5_file is not None:
+#             with h5py.File(h5_file, 'w') as dfile:
+#                 dfile.create_dataset('test', data=test_data)
+#                 dfile.create_dataset('train', data=train_data)
+#                 dfile.create_dataset('test_props', data=test_pps)
+#                 dfile.create_dataset('train_props', data=train_pps)
+#                 dfile.create_dataset('property_norms', data=Ps_norms)
+#
+#     return train_data, test_data, train_pps, test_pps
+#
 
 def SmilesToArray(xs, tokens, max_len=999):
     '''

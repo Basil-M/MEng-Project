@@ -1,16 +1,23 @@
 import argparse
-import pandas
+from functools import reduce
+
 import h5py
 import numpy as np
-from rdkit import Chem
-from utils import one_hot_array, one_hot_index
-from functools import reduce
+import pandas
+import progressbar
+from keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
 
-MAX_NUM_ROWS = 3000
+from dataloader import SmilesToArray
+
+MAX_NUM_ROWS = 100000
 SMILES_COL_NAME = 'structure'
+DICT_LOC = 'data/SMILES_dict.txt'
 INFILE = 'data/zinc12.h5'
-OUTFILE = 'data/zinc_3k.txt'
+OUTFILE = 'data/zinc_100k.h5'
+
+from utils import rdkit_funcs, TokenList
+from rdkit import Chem
 
 
 def get_arguments():
@@ -24,96 +31,155 @@ def get_arguments():
                         help='Maximum number of rows to include (randomly sampled).')
     parser.add_argument('--smiles_column', type=str, default=SMILES_COL_NAME,
                         help="Name of the column that contains the SMILES strings. Default: %s" % SMILES_COL_NAME)
-    parser.add_argument('--property_column', type=str,
-                        help="Name of the column that contains the property values to predict. Default: None")
+    parser.add_argument('--property_column', type=str, default="HBD/HBA/Charge/psf",
+                        help="Names of columns (separated by /) containing properties e.g. HOMO9/LUMO9. Default: None")
+    parser.add_argument('--rdkit_props', type=str, metavar='prop1/prop2', default='QED/SAS/LOGP/MOLWT',
+                        help="Names of properties (separated by /) to fetch from RDKIT e.g. QED/SAS. Options: QED, SAS, LOGP, MOLWT. Default: None")
     parser.add_argument('--model_arch', type=str, metavar='N', default='VAE',
                         help='Model architecture to use - options are VAE, TRANSFORMER')
     parser.add_argument('--train_frac', type=float, metavar='0.8', default=0.8,
                         help='Fraction of data to use for training')
-
+    parser.add_argument('--charset', type=str, metavar='dict.txt', default=DICT_LOC,
+                        help='Path of charset file. If blank, will generate charset using data.')
+    parser.add_argument('--max_len', type=int, metavar='args.max_len', default=120,
+                        help='Maximum length to use from dataset')
     return parser.parse_args()
-
-
-def chunk_iterator(dataset, chunk_size=1000):
-    chunk_indices = np.array_split(np.arange(len(dataset)),
-                                   len(dataset) / chunk_size)
-    for chunk_ixs in chunk_indices:
-        chunk = dataset[chunk_ixs]
-        yield (chunk_ixs, chunk)
-    raise StopIteration
 
 
 def main():
     args = get_arguments()
 
+    print("Loading data from", args.infile)
     data = pandas.read_hdf(args.infile, 'table')
-    keys = data[args.smiles_column].map(len) < 121
 
+    colnames = list(data)
+    print(colnames)
+    keys = data[args.smiles_column].map(len) < args.max_len + 1
     if args.length <= len(keys):
         data = data[keys].sample(n=args.length)
     else:
         data = data[keys]
 
-    structures = data[args.smiles_column].map(lambda x: list(x.ljust(120)))
+    structures = data[args.smiles_column].map(lambda x: list(x.ljust(args.max_len)))
 
     # Currently transformer model takes data in a different format
     # TODO(Basil): Merge how Transformer/VAE handle data
-    if args.model_arch == 'TRANSFORMER':
-        # Write structures to output
-        f = open(args.outfile, 'w')
-        for struct in structures:
-            # canonicalise
-            struct = ''.join(struct)
-            #print(struct)
-            mol = Chem.MolFromSmiles(struct)
-            if mol:
-                struct = Chem.MolToSmiles(mol)
-                f.write(struct + "\n")
+
+    properties = []
+    prop_names = []
+    if args.property_column:
+        print("Fetching properties from dataset")
+        colnames = list(data)
+        for prop in args.property_column.split("/"):
+            if prop in colnames:
+                print("\tFetching", prop)
+                properties.append(data[prop][keys])
+                prop_names.append(prop)
+            else:
+                print("\tProperty", prop, "not found in data file.")
+                print("\tAvailable columns are:", ','.join(colnames))
+
+    del data
+
+    # Get training and testing indices
+    train_idx, test_idx = map(np.array,
+                              train_test_split(structures.index, test_size=1 - args.train_frac))
+
+    # Get character set
+    if args.charset:
+        with open(args.charset) as fin:
+            charset = list(ll for ll in fin.read().split('\n') if ll != "")
     else:
-        if args.property_column:
-            properties = data[args.property_column][keys]
-
-        del data
-
-        # Get training and testing indices
-        train_idx, test_idx = map(np.array,
-                                  train_test_split(structures.index, test_size=1-args.train_frac))
-
         charset = list(reduce(lambda x, y: set(y) | x, structures, set()))
+    # Explicitly encode so it can be saved in h5 file
+    # PREPROCESSING FOR TRANSFORMER MODEL
+    print("Canonicalising strings")
+    bar_i = 0
+    widgets = [' [', progressbar.Timer(), '] ', progressbar.Bar(), ' (', progressbar.ETA(), ') ', ]
+    with progressbar.ProgressBar(maxval=args.length, widgets=widgets) as bar:
+        train_str = []
+        test_str = []
+        for (idx, lst) in zip([train_idx, test_idx], [train_str, test_str]):
+            # canonicalise
+            for id in idx:
+                struct = ''.join(structures[id])
+                # print(struct)
+                mol = Chem.MolFromSmiles(struct)
+                if mol:
+                    struct = Chem.MolToSmiles(mol)
+                    lst.append(struct)
+                bar_i += 1
+                bar.update(bar_i)
+    # Split testing and training data
+    # TODO(Basil): Fix ugly hack with the length of Xs...
+    h5f = h5py.File(args.outfile, 'w')
+    tokens = TokenList(charset)
+    transformer_train = SmilesToArray(train_str, tokens, args.max_len)
+    transformer_test = SmilesToArray(test_str, tokens, args.max_len)
 
-        one_hot_encoded_fn = lambda row: map(lambda x: one_hot_array(x, len(charset)),
-                                             one_hot_index(row, charset))
+    h5f.create_dataset('cat/train', data=transformer_train)
+    h5f.create_dataset('cat/test', data=transformer_test)
+    h5f.create_dataset('charset', data=[c.encode('utf8') for c in charset])
 
-        h5f = h5py.File(args.outfile, 'w')
-        h5f.create_dataset('charset', data=charset)
+    # Create data for GRU and pad to max length
+    # bs x ml x 38
 
-        def create_chunk_dataset(h5file, dataset_name, dataset, dataset_shape,
-                                 chunk_size=1000, apply_fn=None):
-            new_data = h5file.create_dataset(dataset_name, dataset_shape,
-                                             chunks=tuple([chunk_size] + list(dataset_shape[1:])))
-            for (chunk_ixs, chunk) in chunk_iterator(dataset):
-                if not apply_fn:
-                    new_data[chunk_ixs, ...] = chunk
-                else:
-                    new_data[chunk_ixs, ...] = apply_fn(chunk)
+    onehot_train = to_categorical(transformer_train, tokens.num())
+    onehot_test = to_categorical(transformer_test, tokens.num())
+    print("SHAPES BEFORE PADDING:", np.shape(onehot_train), np.shape(onehot_test))
+    mlen = np.max([args.max_len, np.shape(onehot_train)[1], np.shape(onehot_test)[1]])
+    onehot_train = np.pad(onehot_train, ((0, 0), (0, mlen - np.shape(onehot_train)[1]), (0, 0)), 'constant')
+    onehot_test = np.pad(onehot_test, ((0, 0), (0, mlen - np.shape(onehot_test)[1]), (0, 0)), 'constant')
+    print("SHAPES AFTER PADDING:", np.shape(onehot_train), np.shape(onehot_test))
+    h5f.create_dataset('onehot/train', data=onehot_train)
+    h5f.create_dataset('onehot/test', data=onehot_test)
 
-        create_chunk_dataset(h5f, 'data_train', train_idx,
-                             (len(train_idx), 120, len(charset)),
-                             apply_fn=lambda ch: np.array(map(one_hot_encoded_fn,
-                                                              structures[ch])))
-        create_chunk_dataset(h5f, 'data_test', test_idx,
-                             (len(test_idx), 120, len(charset)),
-                             apply_fn=lambda ch: np.array(map(one_hot_encoded_fn,
-                                                              structures[ch])))
+    # PROPERTIES
+    test_props = []
+    train_props = []
 
-        # calculate properties
+    p = lambda x: np.reshape(np.array(x), newshape=(1, len(x)))
+    for prop in properties:
+        if len(test_props):
+            test_props = np.vstack((test_props, p(prop[test_idx])))
+            train_props = np.vstack((train_props, p(prop[train_idx])))
+        else:
+            test_props = p(prop[test_idx])
+            train_props = p(prop[train_idx])
 
+    print("Calculating RDKit properties")
+    for prop in args.rdkit_props.split("/"):
+        if prop in rdkit_funcs:
+            print("\tComputing", prop)
+            if len(test_props):
+                test_props = np.vstack((test_props, p([rdkit_funcs[prop](s) for s in test_str])))
+                train_props = np.vstack((train_props, p([rdkit_funcs[prop](s) for s in train_str])))
+            else:
+                test_props = p([rdkit_funcs[prop](s) for s in test_str])
+                train_props = p([rdkit_funcs[prop](s) for s in train_str])
 
+            prop_names.append(prop)
+        else:
+            print("\tProperty", prop, "not found as RDKit function")
 
-        if args.property_column:
-            h5f.create_dataset('property_train', data=properties[train_idx])
-            h5f.create_dataset('property_test', data=properties[test_idx])
-            h5f.close()
+    print("Normalising properties")
+    means = []
+    stds = []
+    for k in range(len(prop_names)):
+        means.append(np.mean(train_props[k, :]))
+        stds.append(np.std(train_props[k, :]))
+        print(prop_names[k], "- Mu = {:.2f}, Std = {:.2f}".format(means[k],stds[k]))
+        train_props[k, :] = (train_props[k, :] - means[k])/stds[k]
+        test_props[k, :] = (test_props[k, :] - means[k]) / stds[k]
+
+    if prop_names:
+        # save to dataset
+        print("TRAIN PROPS SHAPE", np.shape(train_props))
+        h5f.create_dataset('properties/names', data=np.string_(prop_names))
+        h5f.create_dataset('properties/train', data=np.transpose(train_props))
+        h5f.create_dataset('properties/test', data=np.transpose(test_props))
+        h5f.create_dataset('properties/means', data=means)
+        h5f.create_dataset('properties/stds', data=stds)
 
 
 if __name__ == '__main__':

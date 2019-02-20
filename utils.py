@@ -1,9 +1,16 @@
 # coding = utf-8
+import os
+import pickle
+from os.path import dirname
+
 import h5py
 import numpy as np
-from keras.callbacks import Callback
 from keras import backend as K
-from os.path import dirname, exists
+from keras.callbacks import Callback
+from keras.utils import to_categorical
+from rdkit.Chem.Crippen import MolLogP as LogP
+from rdkit.Chem.Descriptors import MolWt
+from rdkit.Chem.QED import qed as QED
 
 
 def FreqDict2List(dt):
@@ -56,12 +63,12 @@ class epoch_track(Callback):
 
                 arr = np.hstack((arr, padding))
                 for e in range(epoch):
-                    arr[0, num_params + 2 * e] = "Epoch {} train accu".format(e + 1)
-                    arr[0, num_params + 2 * e + 1] = "Epoch {} val accu".format(e + 1)
+                    arr[0, num_params + 2 * e] = "Epoch {} train acc".format(e + 1)
+                    arr[0, num_params + 2 * e + 1] = "Epoch {} val acc".format(e + 1)
 
             # add new val/training acc
-            arr[self.rownum, num_params + 2 * epoch - 2] = logs["accu"]
-            arr[self.rownum, num_params + 2 * epoch - 1] = logs["val_accu"]
+            arr[self.rownum, num_params + 2 * epoch - 2] = logs["acc"]
+            arr[self.rownum, num_params + 2 * epoch - 1] = logs["val_acc"]
             # save csv
             np.savetxt(self.csv_filename, arr, delimiter=",", fmt='%s')
 
@@ -88,6 +95,7 @@ class WeightAnnealer_epoch(Callback):
     '''
 
     def __init__(self, var, anneal_epochs=10, max_val=1.0, init_epochs=1):
+        super().__init__()
         self.weight_var = var
         self.max_weight = max_val
         self.init_epochs = init_epochs
@@ -155,21 +163,27 @@ def decode_smiles_from_indexes(vec, charset):
     return "".join(map(lambda x: charset[x], vec)).strip()
 
 
-def load_dataset(filename, split=True):
-    h5f = h5py.File(filename, 'r')
-    if split:
-        data_train = h5f['data_train'][:]
-    else:
-        data_train = None
-    data_test = h5f['data_test'][:]
-    charset = h5f['charset'][:]
-    h5f.close()
-    if split:
-        return (data_train, data_test, charset)
-    else:
-        return (data_test, charset)
+def load_dataset(filename, architecture="TRANSFORMER", props=False):
+    with h5py.File(filename, 'r') as h5f:
+        pref = "cat" if architecture == "TRANSFORMER" else "onehot"
+        data_train = h5f[pref + '/train'][:]
+        data_test = h5f[pref + '/test'][:]
+        if props:
+            props_train = h5f['properties/train'][:]
+            props_test = h5f['properties/test'][:]
+            data_train = [data_train, props_train]
+            data_test = [data_test, props_test]
+        tokens = TokenList([str(s) for s in h5f['charset'][:]])
 
+    return data_train, data_test, tokens
 
+def load_properties(filename):
+    with h5py.File(filename, 'r') as h5f:
+        props_train = h5f['properties/train'][:]
+        props_test = h5f['properties/test'][:]
+        prop_labels = h5f['properties/names'][:]
+
+    return props_train, props_test, prop_labels
 # SA SCORE
 #
 # calculation of synthetic accessibility score as described in:
@@ -195,7 +209,6 @@ from rdkit.Chem import rdMolDescriptors
 from rdkit.six import iteritems
 import pickle as cPickle
 import math
-from collections import defaultdict
 
 import os.path as op
 
@@ -207,7 +220,7 @@ def readFragmentScores(name='fpscores'):
     global _fscores
     # generate the full path filename:
     if name == "fpscores":
-        name = op.join(op.dirname(__file__), name) + "/"
+        name = op.join(op.dirname(__file__), name)  # + "/"
     _fscores = cPickle.load(gzip.open('%s.pkl.gz' % name))
     outDict = {}
     for i in _fscores:
@@ -285,6 +298,7 @@ def calculateScore(m):
 
     return sascore
 
+
 #
 #  Copyright (c) 2013, Novartis Institutes for BioMedical Research Inc.
 #  All rights reserved.
@@ -315,3 +329,175 @@ def calculateScore(m):
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
+
+rdkit_funcs = {"QED": lambda x: QED(Chem.MolFromSmiles(x)),
+               "MOLWT": lambda x: MolWt(Chem.MolFromSmiles(x)),
+               "SAS": lambda x: calculateScore(Chem.MolFromSmiles(x)),
+               "LOGP": lambda x: LogP(Chem.MolFromSmiles(x))}
+
+
+class AttnParams:
+    _params = None
+
+    def __init__(self):
+        self._training_params = ["current_epoch", "ae_trained"]
+        self._params = {
+            "model": None,
+            "data": None,  # Data stuff
+            "len_limit": 120,
+            "num_props": 4,
+            "current_epoch": 1,  # Training params
+            "epochs": 25,
+            "ae_trained": False,
+            "batch_size": 20,
+            "kl_pretrain_epochs": 0,
+            "kl_anneal_epochs": 3,
+            "kl_max_weight": 10,
+            "WAE_kernel": "RBF",
+            "WAE_s": 2,
+            "stddev": 1,
+            "pp_weight": 1.25,
+            "pp_epochs": 15,
+            "model_arch": "TRANSFORMER",  # Model params
+            "latent_dim": 64,
+            "d_model": 24,
+            "d_inner_hid": 196,
+            "d_k": 4,
+            "d_v": 4,
+            "heads": 4,
+            "layers": 1,
+            "dropout": 0.1,
+            "bottleneck": "average",
+            "ID_d_model": None,
+            "ID_d_inner_hid": None,
+            "ID_heads": None,
+            "ID_d_k": None,
+            "ID_d_v": None,
+            "ID_layers": None,
+            "ID_width": 4,
+            "pp_layers": 3,
+            "num_params": None
+        }
+
+    def __getitem__(self, param):
+        if param in self._params:
+            return self._params[param]
+        else:
+            raise Warning("Param {} unrecognised".format(param))
+
+    def __setitem__(self, param, value):
+        if not value is None:
+            if param in self._params:
+                self._params[param] = value
+            else:
+                print("Param {} unrecognised".format(param))
+
+    def load(self, fn):
+        with open(fn, mode='rb') as f:
+            self._params = pickle.load(f)
+
+    def save(self, fn):
+        with open(fn, mode='wb') as f:
+            pickle.dump(self._params, f, pickle.HIGHEST_PROTOCOL)
+
+    def setIDparams(self):
+        # Will by default set interim decoder parameters
+        # to have same as normal parameters
+        if self._params["bottleneck"] == "interim_decoder":
+            for key in self._params:
+                if "ID" in key:
+                    if self._params[key] is None:
+                        self._params[key] = self._params[key.replace("ID_", "")]
+
+    def dump(self):
+        # get max length
+        m_len = max([len(key) for key in self._params])
+
+        for key in self._params:
+            if "ID" in key and self._params["bottleneck"] != "interim_decoder":
+                pass
+            else:
+                print("\t{}  {}".format(key.ljust(m_len), self._params[key]))
+
+    def dumpToCSV(self, filename):
+        # Check if csv already exists
+        if not os.path.exists(filename):
+            arr = np.transpose(np.array(list(self._params.items())))
+            rownum = 1
+        else:
+            arr = np.genfromtxt(filename, delimiter=",", dtype=str)
+            # check if this model already exists
+            rownum = np.where(arr[:, 0] == self["model"])[0]
+            if not rownum:
+                newvals = [self._params[key] for key in self._params]
+                num_pad = np.shape(arr)[1] - len(newvals)
+                [newvals.extend("-") for _ in range(num_pad)]
+                arr = np.vstack((arr, newvals))
+                rownum = np.shape(arr)[0] - 1
+            else:
+                rownum = rownum[0]
+
+        np.savetxt(filename, arr, delimiter=",", fmt='%s')
+
+        return rownum, arr
+
+    def equals(self, other_params):
+        for key in self._params:
+            if other_params[key] != self._params[key] and key not in self._training_params:
+                return False
+        return True
+
+    @property
+    def params(self):
+        return self._params
+
+
+class TokenList:
+    def __init__(self, token_list):
+        self.id2t = ['<PAD>', '<UNK>', '<S>', '</S>']
+        self.id2t.extend(token_list)
+        self.t2id = {v: k for k, v in enumerate(self.id2t)}
+
+    def id(self, x):
+        return self.t2id.get(x, 1)
+
+    def token(self, x):
+        return self.id2t[x]
+
+    def num(self):
+        return len(self.id2t)
+
+    def startid(self):
+        return 2
+
+    def endid(self):
+        return 3
+
+    def tokenize(self, input_str):
+        '''
+        Given a string input sequence will return a tokenised sequence
+        :param input_str:
+        :return:
+        '''
+        if isinstance(input_str, str):
+            src_seq = np.zeros((1, len(input_str) + 3), dtype='int32')
+            src_seq[0, 0] = self.startid()
+            for i, z in enumerate(input_str):
+                src_seq[0, 1 + i] = self.id(z)
+            src_seq[0, len(input_str) + 1] = self.endid()
+        else:
+            src_seq = np.expand_dims(input_str, 0)
+
+        return src_seq
+
+    def onehotify(self, input_str, pad_length = None):
+        '''
+        Given a string input sequence will return a tokenised sequence
+        :param input_str:
+        :return:
+        '''
+        src_seq = self.tokenize(input_str)
+        src_seq = to_categorical(src_seq, self.num())
+        if pad_length:
+            src_seq = np.pad(src_seq, ((0,0), (0, pad_length - np.shape(src_seq)[1]), (0,0)), mode='constant')
+        return src_seq

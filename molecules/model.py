@@ -1,4 +1,3 @@
-import tensorflow as tf
 import numpy as np
 import tensorflow as tf
 from keras import backend as K
@@ -18,50 +17,35 @@ from molecules.transformer import debugPrint
 class MoleculeVAE():
     autoencoder = None
 
-    def create(self,
-               charset,
-               max_length=120,
-               latent_rep_size=292,
-               weights_file=None):
-        charset_length = len(charset)
+    def __init__(self, tokens, params):
+        self.p = params
+        # self.p["len_limit"] = p["len_limit"]
+        self.charset_length = tokens.num()
+        x = Input(shape=(self.p["len_limit"], self.charset_length))
+        _, z, mean, logvar = self._buildEncoder(x)
+        self.encode_sample = Model(x, z)
+        self.encode = Model(x, [mean, logvar])
 
-        x = Input(shape=(max_length, charset_length))
-        _, z = self._buildEncoder(x, latent_rep_size, max_length)
-        self.encoder = Model(x, z)
-
-        encoded_input = Input(shape=(latent_rep_size,))
-        self.decoder = Model(
+        encoded_input = Input(shape=(self.p["latent_dim"],))
+        self.decode = Model(
             encoded_input,
-            self._buildDecoder(
-                encoded_input,
-                latent_rep_size,
-                max_length,
-                charset_length
-            )
+            self._buildDecoder(encoded_input)
         )
 
-        x1 = Input(shape=(max_length, charset_length))
-        vae_loss, z1 = self._buildEncoder(x1, latent_rep_size, max_length)
+        x1 = Input(shape=(self.p["len_limit"], self.charset_length))
+        vae_loss, z1, mean, logvar = self._buildEncoder(x1)
+        p1 = self._buildPropertyPredictor(z1)
         self.autoencoder = Model(
             x1,
-            self._buildDecoder(
-                z1,
-                latent_rep_size,
-                max_length,
-                charset_length
-            )
+            [self._buildDecoder(z1), p1]
         )
 
-        if weights_file:
-            self.autoencoder.load_weights(weights_file)
-            self.encoder.load_weights(weights_file, by_name=True)
-            self.decoder.load_weights(weights_file, by_name=True)
-
         self.autoencoder.compile(optimizer='Adam',
-                                 loss=vae_loss,
+                                 loss=[vae_loss, 'mean_squared_error'],
+                                 loss_weights=[1.0, self.p["pp_weight"]/self.p["num_props"]**2],
                                  metrics=['accuracy'])
 
-    def _buildEncoder(self, x, latent_rep_size, max_length, epsilon_std=0.01):
+    def _buildEncoder(self, x):
         h = Convolution1D(9, 9, activation='relu', name='conv_1')(x)
         h = Convolution1D(9, 9, activation='relu', name='conv_2')(h)
         h = Convolution1D(10, 11, activation='relu', name='conv_3')(h)
@@ -71,34 +55,36 @@ class MoleculeVAE():
         def sampling(args):
             z_mean_, z_log_var_ = args
             batch_size = K.shape(z_mean_)[0]
-            epsilon = K.random_normal(shape=(batch_size, latent_rep_size), mean=0., stddev=epsilon_std)
+            epsilon = K.random_normal(shape=(batch_size, self.p["latent_dim"]), mean=0., stddev=self.p["stddev"])
             return z_mean_ + K.exp(z_log_var_ / 2) * epsilon
 
-        z_mean = Dense(latent_rep_size, name='z_mean', activation='linear')(h)
-        z_log_var = Dense(latent_rep_size, name='z_log_var', activation='linear')(h)
+        z_mean = Dense(self.p["latent_dim"], name='z_mean', activation='linear')(h)
+        z_log_var = Dense(self.p["latent_dim"], name='z_log_var', activation='linear')(h)
 
         def vae_loss(x, x_decoded_mean):
             x = K.flatten(x)
             x_decoded_mean = K.flatten(x_decoded_mean)
-            xent_loss = max_length * objectives.binary_crossentropy(x, x_decoded_mean)
+            xent_loss = self.p["len_limit"] * objectives.binary_crossentropy(x, x_decoded_mean)
             kl_loss = - 0.5 * K.mean(1 + z_log_var - K.square(z_mean) - K.exp(z_log_var), axis=-1)
             return xent_loss + kl_loss
 
-        return vae_loss, Lambda(sampling, output_shape=(latent_rep_size,), name='lambda')([z_mean, z_log_var])
+        return vae_loss, Lambda(sampling, output_shape=(self.p["latent_dim"],), name='lambda')(
+            [z_mean, z_log_var]), z_mean, z_log_var
 
-    def _buildDecoder(self, z, latent_rep_size, max_length, charset_length):
-        h = Dense(latent_rep_size, name='latent_input', activation='relu')(z)
-        h = RepeatVector(max_length, name='repeat_vector')(h)
+    def _buildDecoder(self, z):
+        h = Dense(self.p["latent_dim"], name='latent_input', activation='relu')(z)
+        h = RepeatVector(self.p["len_limit"], name='repeat_vector')(h)
         h = GRU(501, return_sequences=True, name='gru_1')(h)
         h = GRU(501, return_sequences=True, name='gru_2')(h)
         h = GRU(501, return_sequences=True, name='gru_3')(h)
-        return TimeDistributed(Dense(charset_length, activation='softmax'), name='decoded_mean')(h)
 
-    def save(self, filename):
-        self.autoencoder.save_weights(filename)
+        return TimeDistributed(Dense(self.charset_length, activation='softmax'), name='decoder')(h)
 
-    def load(self, charset, weights_file, latent_rep_size=292):
-        self.create(charset, weights_file=weights_file, latent_rep_size=latent_rep_size)
+    def _buildPropertyPredictor(self, x):
+        h = Dense(self.p["latent_dim"], input_shape=(self.p["latent_dim"],), activation='linear')(x)
+        for _ in range(self.p["pp_layers"] - 1):
+            h = Dense(self.p["pp_layers"], activation='linear')(h)
+        return Dense(self.p["num_props"], activation='linear', name='props')(h)
 
 
 # https://github.com/Lsdefine/attention-is-all-you-need-keras
@@ -261,11 +247,11 @@ class TriTransformer:
             latent_vec = z_sampled
 
         h = Dense(latent_dim, input_shape=(latent_dim,), activation='linear')(latent_vec)
-        num_props = 4
-        prop_input = Input(shape=[num_props])
+
+        prop_input = Input(shape=[self.p["num_props"]])
         for _ in range(self.p["pp_layers"] - 1):
             h = Dense(latent_dim, activation='linear')(h)
-        prop_output = Dense(num_props, activation='linear')(h)
+        prop_output = Dense(self.p["num_props"], activation='linear')(h)
 
         # RECONSTRUCTION LOSS
         def rec_loss(args):
@@ -290,7 +276,7 @@ class TriTransformer:
             SE = K.sqrt(SE)
             return self.pp_loss_var * tf.reduce_mean(SE)  # / K.shape(prop_output)[0]
 
-        def get_accu(args):
+        def get_acc(args):
             y_pred, y_true = args
             mask = tf.cast(tf.not_equal(y_true, 0), 'float32')
             corr = K.cast(K.equal(K.cast(y_true, 'int32'), K.cast(K.argmax(y_pred, axis=-1), 'int32')), 'float32')
@@ -306,8 +292,9 @@ class TriTransformer:
                 print("Using variational autoencoder")
                 kl = Lambda(kl_loss, name='VariationalLoss')([z_mean, z_logvar])
             else:
-                kl = Lambda(self.mmd_penalty, name='VariationalLoss')(z_sampled)
-                # kl = Lambda(self.wae_mmd_exact, name='VariationalLoss')([z_mean, z_logvar])
+                kl = Lambda(self.mmd_penalty, name='WAELoss')(z_sampled)
+                self.metrics["wae"] = Lambda(self.wae_mmd_exact, name='VariationalLoss')(
+                    [z_mean, z_logvar])  # self.metrics["wae"]
                 kl2 = Lambda(lambda x: 0.01 * tf.reduce_mean(K.square(x)))(z_logvar)
             self.metrics["kl_loss"] = kl
             losses.append(kl)
@@ -331,7 +318,7 @@ class TriTransformer:
 
         ## METRICS
         self.metrics["ppl"] = Lambda(K.exp)(loss)
-        self.metrics["accu"] = Lambda(get_accu)([final_output[1], tgt_true])
+        self.metrics["acc"] = Lambda(get_acc)([final_output[1], tgt_true])
         self.metrics["meanmean"] = Lambda(tf.reduce_mean)(z_mean)
         self.metrics["meanlogvar"] = Lambda(tf.reduce_mean)(z_logvar)
 
@@ -366,23 +353,6 @@ class TriTransformer:
             self.autoencoder.metrics_names.append(key)
             self.autoencoder.metrics_tensors.append(self.metrics[key])
 
-    def make_src_seq_matrix(self, input_seq):
-        '''
-        Given a string input sequence will return a tokenised sequence
-        :param input_seq:
-        :return:
-        '''
-        if isinstance(input_seq, str):
-            src_seq = np.zeros((1, len(input_seq) + 3), dtype='int32')
-            src_seq[0, 0] = self.i_tokens.startid()
-            for i, z in enumerate(input_seq):
-                src_seq[0, 1 + i] = self.i_tokens.id(z)
-            src_seq[0, len(input_seq) + 1] = self.i_tokens.endid()
-        else:
-            src_seq = np.expand_dims(input_seq, 0)
-
-        return src_seq
-
     def decode_sequence(self, input_seq, delimiter='', moments=None):
         # First get the latent representation
         target_seq = np.zeros((1, self.p["len_limit"]), dtype='int32')
@@ -391,7 +361,7 @@ class TriTransformer:
         decoded_tokens = []
         # If mean/variance not provided, calculate
         if moments is None:
-            src_seq = self.make_src_seq_matrix(input_seq)
+            src_seq = self.i_tokens.tokenize(input_seq)
             z = self.encode_sample.predict_on_batch([src_seq, target_seq])
         else:
             mean, logvar = moments
@@ -419,7 +389,7 @@ class TriTransformer:
 
         # If mean/variance not provided, calculate
         if moments is None:
-            src_seq = self.make_src_seq_matrix(input_seq)
+            src_seq = self.i_tokens.tokenize(input_seq)
             z = self.encode_sample.predict_on_batch([src_seq, target_seq])
         else:
             mean, logvar = moments
@@ -437,7 +407,7 @@ class TriTransformer:
     def beam_search(self, input_seq=None, topk=5, delimiter='', moments=None):
         # If mean/variance not provided, calculate
         if moments is None:
-            src_seq = self.make_src_seq_matrix(input_seq)
+            src_seq = self.i_tokens.tokenize(input_seq)
             z = self.encode_sample.predict_on_batch(src_seq)
         elif len(moments) == 2:
             mean, logvar = moments
@@ -660,6 +630,129 @@ class TriTransformer:
             exponent -= K.square(mx) / vx
             return coeff * K.exp(0.5 * K.sum(exponent, axis=1))
 
-        return K.mean(expected_rbf(mu, var) +
-                      expected_rbf(prior_mu, prior_var) -
-                      2 * expected_rbf(mu, var, prior_mu, prior_var))
+        return self.kl_loss_var * K.mean(expected_rbf(mu, var) +
+                                         expected_rbf(prior_mu, prior_var) -
+                                         2 * expected_rbf(mu, var, prior_mu, prior_var))
+
+
+class SequenceInference():
+    def __init__(self, model, tokens, weights_file=None):
+        self.model = model
+        self.tokens = tokens
+        if weights_file:
+            self.model.autoencoder.load_weights(weights_file, by_name=True)
+            self.model.encode.load_weights(weights_file, by_name=True)
+            self.model.decode.load_weights(weights_file, by_name=True)
+
+        if model.p["model_arch"] == "TRANSFORMER":
+            self.prepare_str = lambda x: self.tokens.tokenize(x)
+        else:
+            self.prepare_str = lambda x: self.tokens.onehotify(x, model.p["len_limit"])
+
+    def decode_sequence(self, input_seq, delimiter='', moments=None):
+        # First get the latent representation
+        target_seq = np.zeros((1, self.model.p["len_limit"]), dtype='int32')
+        target_seq[0, 0] = self.tokens.startid()
+
+        decoded_tokens = []
+        # If mean/variance not provided, calculate
+        if moments is None:
+            src_seq = self.prepare_str(input_seq)
+            [mean, logvar] = self.model.encode.predict_on_batch([src_seq, target_seq])
+        else:
+            mean, logvar = moments
+
+        # sample from moments
+        z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
+
+        for i in range(self.model.p["len_limit"] - 1):
+            output = self.model.decode.predict_on_batch([z, target_seq])
+            sampled_index = np.argmax(output[0, i, :])
+            sampled_token = self.tokens.token(sampled_index)
+            decoded_tokens.append(sampled_token)
+            if sampled_index == self.tokens.endid(): break
+            target_seq[0, i + 1] = sampled_index
+        return delimiter.join(decoded_tokens[:-1])
+
+    def decode_sequence_fast(self, input_seq, delimiter='', moments=None):
+        '''
+        Greedy decodes a sequence by keeping the most probable output symbol at each stage
+        :param input_seq: String e.g. 'Cc1cccc1'
+        :param delimiter:
+        :return: output sequence as a string
+        '''
+        decoded_tokens = []
+        target_seq = np.zeros((1, self.model.p["len_limit"]), dtype='int32')
+        target_seq[0, 0] = self.tokens.startid()
+
+        # If mean/variance not provided, calculate
+        if moments is None:
+            src_seq = self.prepare_str(input_seq)
+            [mean, logvar] = self.model.encode.predict_on_batch([src_seq, target_seq])
+        else:
+            mean, logvar = moments
+
+        # sample from moments
+        z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
+        for i in range(self.model.p["len_limit"] - 1):
+            output = self.model.decode.predict_on_batch([z, target_seq])
+            sampled_index = np.argmax(output[0, i, :])
+            sampled_token = self.tokens.token(sampled_index)
+            decoded_tokens.append(sampled_token)
+            if sampled_index == self.tokens.endid(): break
+            target_seq[0, i + 1] = sampled_index
+        return delimiter.join(decoded_tokens[:-1])
+
+    def beam_search(self, input_seq=None, topk=5, delimiter='', moments=None):
+        # If mean/variance not provided, calculate
+        if moments is None:
+            src_seq = self.prepare_str(input_seq)
+            [mean, logvar] = self.model.encode.predict_on_batch(src_seq)
+            z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
+        elif len(moments) == 2:
+            # have been provided mean and variance
+            mean, logvar = moments
+            z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
+        else:
+            # have been provided z
+            z = np.reshape(moments[0], [1, len(moments[0])])
+
+        z = z.repeat(topk, 0)
+
+        final_results = []
+        decoded_tokens = [[] for _ in range(topk)]
+        decoded_logps = [0] * topk
+        lastk = 1
+        target_seq = np.zeros((topk, self.model.p["len_limit"]), dtype='int32')
+        target_seq[:, 0] = self.tokens.startid()
+
+        for i in range(self.model.p["len_limit"] - 1):
+            if lastk == 0 or len(final_results) > topk * 3: break
+            if self.model.p["model_arch"] == "TRANSFORMER":
+                output = self.model.decode.predict_on_batch([z, target_seq])
+            else:
+                output = self.model.decode.predict_on_batch(z)
+            output = np.exp(output[:, i, :])
+            output = np.log(output / np.sum(output, -1, keepdims=True) + 1e-8)
+            cands = []
+            for k, wprobs in zip(range(lastk), output):
+                if target_seq[k, i] == self.tokens.endid(): continue
+                wsorted = sorted(list(enumerate(wprobs)), key=lambda x: x[-1], reverse=True)
+                for wid, wp in wsorted[:topk]:
+                    cands.append((k, wid, decoded_logps[k] + wp))
+            cands.sort(key=lambda x: x[-1], reverse=True)
+            cands = cands[:topk]
+            backup_seq = target_seq.copy()
+            for kk, zz in enumerate(cands):
+                k, wid, wprob = zz
+                target_seq[kk,] = backup_seq[k]
+                target_seq[kk, i + 1] = wid
+                decoded_logps[kk] = wprob
+                decoded_tokens.append(decoded_tokens[k] + [self.tokens.token(wid)])
+                if wid == self.tokens.endid(): final_results.append((decoded_tokens[k], wprob))
+            decoded_tokens = decoded_tokens[topk:]
+            lastk = len(cands)
+        final_results = [(x, y / (len(x) + 1)) for x, y in final_results]
+        final_results.sort(key=lambda x: x[-1], reverse=True)
+        final_results = [(delimiter.join(x), y) for x, y in final_results]
+        return final_results
