@@ -8,6 +8,7 @@ from hyperas.distributions import quniform
 from hyperopt import Trials, STATUS_OK, tpe
 
 import dataloader as dd
+import utils
 from train import trainTransformer
 
 MODEL_ARCH = 'TRANSFORMER'
@@ -58,7 +59,7 @@ def create_model(x_train, y_train, x_test, y_test):
         N_GPUS = len(CUDA_VISIBLE_DEVICES.split(","))
 
     ## PARAMETERS
-    params = dd.AttnParams()
+    params = utils.AttnParams()
     params["latent_dim"] = 296
     params["bottleneck"] = "average"
     params["kl_pretrain_epochs"] = 1
@@ -91,8 +92,8 @@ def create_model(x_train, y_train, x_test, y_test):
     model, result = trainTransformer(params, tokens=tokens, data_train=x_train, data_test=x_train,
                                      callbacks=["var_anneal"])
 
-    # get the highest validation accuracy of the training epochs
-    validation_acc = np.amax(result.history['val_accu'])
+    # get the highest validation accracy of the training epochs
+    validation_acc = np.amax(result.history['val_acc'])
     print('Best validation acc of epoch:', validation_acc)
     return {'loss': -validation_acc, 'status': STATUS_OK, 'model': model.autoencoder}
 

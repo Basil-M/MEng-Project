@@ -2,31 +2,32 @@ from __future__ import print_function
 
 import argparse
 import os
-import numpy as np
-
-from keras.optimizers import Adam
-from molecules.transformer import LRSchedulerPerStep
+from os import mkdir
 from os.path import exists
-from os import mkdir, remove
+
+import numpy as np
 import tensorflow as tf
 from keras import backend as k
 from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, TensorBoard
+from keras.optimizers import Adam
+
+import utils
+from molecules.transformer import LRSchedulerPerStep
 from utils import epoch_track, WeightAnnealer_epoch, load_dataset
 
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 k.tensorflow_backend.set_session(tf.Session(config=config))
-import dataloader as dd
 
 NUM_EPOCHS = 20
 BATCH_SIZE = 50
 LATENT_DIM = 128
 RANDOM_SEED = 1403
-DATA = 'data/zinc_1k.txt'
+DATA = 'data/zinc_100k.h5'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
-MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'id_rec3'
+MODEL_ARCH = 'VAE'
+MODEL_NAME = 'gru100k_props'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -42,7 +43,7 @@ set_session(Session(config=config))
 
 
 def get_arguments():
-    default = dd.AttnParams()
+    default = utils.AttnParams()
 
     parser = argparse.ArgumentParser(description='Molecular autoencoder network')
     parser.add_argument('--data', type=str, help='The HDF5 file containing preprocessed data.',
@@ -130,7 +131,14 @@ def get_arguments():
     return parser.parse_args()
 
 
-def trainTransformer(params, tokens, data_train, data_test, model_dir=None, callbacks=None):
+def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_test=None, model_dir=None,
+                     callbacks=None):
+    if data_file:
+        data_train, data_test, tokens = load_dataset(data_file, "TRANSFORMER", params["pp_weight"])
+
+    if params["pp_weight"]:
+        params["num_props"] = np.shape(data_test[1])[1]
+
     if callbacks is None:
         callbacks = ["checkpoint", "best_checkpoint", "tensorboard", "var_anneal", "epoch_track"]
 
@@ -159,7 +167,9 @@ def trainTransformer(params, tokens, data_train, data_test, model_dir=None, call
     # Learning rate scheduler
     cb = []
     for c in callbacks:
-        if c == "checkpoint":
+        if not isinstance(c, str):
+            cb.append(c)
+        elif c == "checkpoint":
             cb.append(ModelCheckpoint(model_dir + "model.h5", save_best_only=False,
                                       save_weights_only=True))
         elif c == "best_checkpoint":
@@ -197,59 +207,49 @@ def main():
     np.random.seed(args.random_seed)
 
     model_dir = args.models_dir + args.model + "/"
+    if not os.path.exists(model_dir):
+        os.mkdir(model_dir)
+    # Get default attention parameters
+    params = utils.AttnParams()
+
+    # Get training and test data from data file
+    # Set up model
+    for arg in vars(args):
+        if arg in params.params:
+            params[arg] = getattr(args, arg)
 
     ## VARIATIONAL AUTOENCODER
     if args.model_arch == "VAE":
-        from molecules.model import MoleculeVAE as model_arch
-        data_train, data_test, charset = load_dataset(args.data)
-
-        model = model_arch()
-        if os.path.isfile(args.model):
-            model.load(charset, args.model, latent_rep_size=args.latent_dim)
+        from molecules.model import MoleculeVAE
+        data_train, data_test, tokens = load_dataset(args.data, "GRU", params["pp_weight"])
+        if params["pp_weight"]:
+            params["num_props"] = np.shape(data_test[1])[1]
+            data_train_in = data_train[0]
+            data_test_in = data_test[0]
         else:
-            model.create(charset, latent_rep_size=args.latent_dim)
+            data_train_in = data_train
+            data_test_in = data_test
 
-        checkpointer = ModelCheckpoint(filepath=model_dir,
-                                       verbose=1,
-                                       save_best_only=True)
+        model = MoleculeVAE(tokens, params)
+        checkpointer = ModelCheckpoint(filepath=model_dir + "best_model.h5", save_best_only=True,
+                                       save_weights_only=True, monitor='val_acc')
 
         reduce_lr = ReduceLROnPlateau(monitor='val_loss',
                                       factor=0.2,
                                       patience=3,
-                                      min_lr=args.base_lr / 10)
+                                      min_lr=0.001)
 
+        params.save(model_dir + "params.pkl")
         model.autoencoder.fit(
-            data_train,
+            data_train_in,
             data_train,
             shuffle=True,
             epochs=args.epochs,
             batch_size=args.batch_size,
             callbacks=[checkpointer, reduce_lr],
-            validation_data=(data_test, data_test)
+            validation_data=(data_test_in, data_test)
         )
     else:
-        # Get default attention parameters
-        params = dd.AttnParams()
-
-        # Process data
-        params["d_file"] = args.data
-        d_file = args.data
-        tokens = dd.MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
-
-        # Get training and test data from data file
-        # if args.gen:
-        #     # Use a generator for data
-        #     _, _, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
-        #                                                       h5_file=d_file.replace('.txt', '_data.h5'))
-        #     gen = dd.SMILESgen(d_file.replace('.txt', '_data.h5'), args.batch_size)
-        # else:
-        data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
-                                                                           h5_file=d_file.replace('.txt',
-                                                                                                  '_data.h5'))
-        # Set up model
-        for arg in vars(args):
-            if arg in params.params:
-                params[arg] = getattr(args, arg)
 
         # Handle interim decoder parameters
         params.setIDparams()
@@ -259,9 +259,8 @@ def main():
             mkdir(model_dir)
 
         # Handle parameters
-        current_epoch = 1
         param_filename = model_dir + "params.pkl"
-        loaded_params = dd.AttnParams()
+        loaded_params = utils.AttnParams()
 
         if not exists(param_filename):
             print("Starting new model {} with params:".format(args.model))
@@ -302,14 +301,15 @@ def main():
                 params = loaded_params
 
         # Train model
-        if params["pp_weight"] == 0 or params["pp_weight"] is None:
-            data_train = data_train
-            data_test = data_test
-        else:
-            data_train = [data_train, props_train]
-            data_test = [data_test, props_test]
+        # if params["pp_weight"] == 0 or params["pp_weight"] is None:
+        #     data_train = data_train
+        #     data_test = data_test
+        # else:
+        #     data_train = [data_train, props_train]
+        #     data_test = [data_test, props_test]
 
-        model, results = trainTransformer(params=params, data_train=data_train, data_test=data_test, tokens=tokens,
+        model, results = trainTransformer(params=params, data_file=args.data,
+                                          # data_train=data_train, data_test=data_test, tokens=tokens,
                                           model_dir=model_dir)
 
 

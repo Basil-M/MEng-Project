@@ -3,10 +3,10 @@ import h5py
 import numpy as np
 from sample_latent import visualize_latent_rep
 from molecules.model import Transformer
-from dataloader import SmilesToArray, AttnParams, MakeSmilesDict, MakeSmilesData
+from dataloader import SmilesToArray, MakeSmilesDict, MakeSmilesData
 from keras.optimizers import Adam
 from metakernel.display import display
-from utils import LoadList
+from utils import LoadList, AttnParams
 from rdkit import Chem
 from IPython import embed
 
@@ -118,7 +118,7 @@ def main():
     model_params.load(model_dir + "params.pkl")
 
     # Get data
-    d_file = model_params["d_file"]
+    d_file = model_params["data"]
     data = [d for d in LoadList(d_file)]  # List of SMILES strings
     tokens = MakeSmilesDict(d_file, dict_file=d_file.replace('.txt', '_dict.txt'))
 
