@@ -367,7 +367,7 @@ class AttnParams:
             "pp_weight": 1.25,
             "pp_epochs": 15,
             "model_arch": "TRANSFORMER",  # Model params
-            "latent_dim": 64,
+            "latent_dim": 32,
             "d_model": 24,
             "d_inner_hid": 196,
             "d_k": 4,
@@ -375,7 +375,7 @@ class AttnParams:
             "heads": 4,
             "layers": 1,
             "dropout": 0.1,
-            "bottleneck": "GRU",
+            "bottleneck": "average",
             "ID_d_model": None,
             "ID_d_inner_hid": None,
             "ID_heads": None,

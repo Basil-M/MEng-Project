@@ -27,7 +27,7 @@ DATA = 'data/zinc_100k.h5'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'transtest3'
+MODEL_NAME = 'avgnew'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
