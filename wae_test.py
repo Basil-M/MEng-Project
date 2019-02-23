@@ -70,9 +70,9 @@ def main():
     data_repetitions = 200000
     num_batches_per_epoch = 500
     w0done = False
-    ng_vals = [1, 2, 3, 4, 5, 10]
-    w_vals = [0,1, 2, 10, 100, 1000]
-    pw_vals = [0, 1.25]
+    ng_vals = [23, 10, 3]
+    w_vals = [0,10]
+    pw_vals = [0, 5]
     vae_done = {}
     for ng in ng_vals:
         d = {}
@@ -83,18 +83,22 @@ def main():
             d[w] = d2
         vae_done[ng] = d
 
-    for kernel in ["VAE", "RBF", "IMQ_normal", "IMG_sphere", "IMQ_uniform"]:
+    for kernel in ["IMQ_normal"]:
         for ng in ng_vals:
-            for nb in [1, 2, 5, 10, 25, 50]:
-                for s in [0.1, 1, 2, 10, 100]:
+            for nb in [50]:
+                for s in [2]:
                     for w in w_vals:
                         for pw in pw_vals:
-                            params["stddev"] = 1
-                            if w == 0 and not w0done:
+                        #     params["stddev"] = 1
+                        #     # if w == 0 and not w0done:
+                        #     #     params["stddev"] = 0
+                        #     #     w0done = True
+                        #     # elif w == 0 and w0done:
+                        #         break
+                            if w == 0:
                                 params["stddev"] = 0
-                                w0done = True
-                            elif w == 0 and w0done:
-                                break
+                            else:
+                                params["stddev"] = 1
 
                             if ng == 1 and nb == 1 and kernel == "RBF":
                                 # for some reason this fails so skib
@@ -130,14 +134,14 @@ def main():
                             params["batch_size"] = ng * num_per_batch
 
                             if params["pp_weight"]:
-                                props = np.linspace(0, 1, len(dataStrs))
+                                props = np.linspace(0, ng, len(dataStrs)) - ng/2
                                 props = np.transpose(np.tile(props, (4, 1)))
                                 props_train = np.tile(props, (int(bs / ng), 1))
                                 props_test = np.tile(props, (num_per_batch, 1))
                                 data_train = [data_train, props_train]
                                 data_test = [data_test, props_test]
 
-                            cb = EarlyStopping(monitor='val_acc', patience=2, verbose=0)
+                            cb = 'potato' #EarlyStopping(monitor='val_acc', patience=10, verbose=0)
                             # Create model tracking folder
                             if exists(MODEL_DIR):
                                 rmtree(MODEL_DIR)
@@ -150,54 +154,55 @@ def main():
                                                                   model_dir=MODEL_DIR)
                             except:
                                 print("training failed, what habben")
-                            try:
-                                print("Autoencoder training complete. Loading best model.")
-                                model.autoencoder.load_weights(MODEL_DIR + "best_model.h5")
+                            # try:
+                            print("Autoencoder training complete. Loading best model.")
+                            model.autoencoder.load_weights(MODEL_DIR + "best_model.h5")
 
-                                # GET LATENTS
-                                print("Generating latent representations from auto-encoder")
-                                mu, logvar = model.encode.predict([trainData], ng)
-                                var = np.exp(logvar)
-                                # z_train = model.encode_sample.predict([data_train], 64)
-                                # z_test = model.encode_sample.predict([data_test], 64)
+                            # GET LATENTS
+                            print("Generating latent representations from auto-encoder")
+                            mu, logvar = model.encode.predict([trainData], ng)
+                            var = np.exp(logvar)
+                            # z_train = model.encode_sample.predict([data_train], 64)
+                            # z_test = model.encode_sample.predict([data_test], 64)
 
-                                ## PLOT THE DATA
-                                gauss = lambda x, mu, var: np.exp(-0.5 * ((x - mu) ** 2) / var) / np.sqrt(
-                                    2 * np.pi * var)
-                                x_vals = np.linspace(-5, 5, 1001)
-                                # plot the prior
-                                sns.set(rc={"lines.linewidth": 1.5})
-                                ax = sns.lineplot(x=x_vals, y=gauss(x_vals, 0, 1), label="Prior = N(0, 1)")
-                                # plot the data
-                                ysum = np.zeros_like(x_vals)
-                                var_s = 0
-                                mu_s = 0
-                                for idx in range(ng):
-                                    mu_i = mu[idx][0]
-                                    var_i = var[idx][0]
-                                    y_i = gauss(x_vals, mu_i, var_i)
-                                    sns.set(rc={"lines.linewidth": 0.15})
-                                    print("Data point {}:\tmu = {:.2f}\tvar={:.2f}".format(dataStrs[idx], mu_i, var_i))
-                                    ax = sns.lineplot(x=x_vals, y=y_i, ax=ax, dashes=True,
-                                                      label="{} = N({:.2f},{:.2f})".format(dataStrs[idx], mu_i, var_i))
-                                    ysum += y_i / ng
-                                    var_s += var_i / ng ** 2
-                                    mu_s += mu_i / ng
+                            ## PLOT THE DATA
+                            gauss = lambda x, mu, var: np.exp(-0.5 * ((x - mu) ** 2) / var) / np.sqrt(
+                                2 * np.pi * var)
+                            x_vals = np.linspace(-5, 5, 1001)
+                            # plot the prior
+                            sns.set(rc={"lines.linewidth": 1.5})
+                            ax = sns.lineplot(x=x_vals, y=gauss(x_vals, 0, 1), label="Prior = N(0, 1)")
+                            # plot the data
+                            ysum = np.zeros_like(x_vals)
+                            var_s = 0
+                            mu_s = 0
+                            for idx in range(ng):
+                                mu_i = mu[idx][0]
+                                var_i = var[idx][0]
+                                y_i = gauss(x_vals, mu_i, var_i)
+                                sns.set(rc={"lines.linewidth": 0.15})
+                                print("Data point {}:\tmu = {:.2f}\tvar={:.2f}".format(dataStrs[idx], mu_i, var_i))
+                                ax = sns.lineplot(x=x_vals, y=y_i, ax=ax, dashes=True,
+                                                  label="{} = N({:.2f},{:.2f})".format(dataStrs[idx], mu_i, var_i))
+                                ysum += y_i / ng
+                                var_s += var_i / ng ** 2
+                                mu_s += mu_i / ng
 
-                                # plot the sum
-                                sns.set(rc={"lines.linewidth": 1.5})
-                                sns.lineplot(x=x_vals, y=ysum, ax=ax,
-                                             label="Total: m = {:.2f}, v = {:.2f})".format(mu_s, var_s))
-                                print("Distribution over all data: mu = {}\tvar={}".format(mu_s, var_s))
+                            # plot the sum
+                            sns.set(rc={"lines.linewidth": 1.5})
+                            sns.lineplot(x=x_vals, y=ysum, ax=ax,
+                                         label="Total: m = {:.2f}, v = {:.2f})".format(mu_s, var_s))
+                            print("Distribution over all data: mu = {}\tvar={}".format(mu_s, var_s))
 
-                                plt.title("Val acc {:.3f}".format(np.amax(results.history['val_acc'])))
-                                fig_name = "wae_test/wae_ng{}_npb{}_s{}_w{}_pw{}_k{}.png".format(ng, nb, s, w, pw,
-                                                                                                 kernel)
-                                plt.savefig(fig_name, bbox_inches="tight")
-                                plt.clf()
-                            except:
-                                print("Could not find file. Probably encounted nan on training :(")
+                            plt.title("Val acc {:.3f}".format(np.amax(results.history['val_acc'])))
+                            fig_name = "wae_test/wae_ng{}_npb{}_s{}_w{}_pw{}_k{}.png".format(ng, nb, s, w, pw,
+                                                                                             kernel)
+                            plt.savefig(fig_name, bbox_inches="tight")
+                            plt.show()
+                            plt.clf()
 
+                            # print("Could not find file. Probably encounted nan on training :(")
+#
 
 if __name__ == '__main__':
     main()

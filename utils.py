@@ -168,14 +168,16 @@ def load_dataset(filename, architecture="TRANSFORMER", props=False):
         pref = "cat" if architecture == "TRANSFORMER" else "onehot"
         data_train = h5f[pref + '/train'][:]
         data_test = h5f[pref + '/test'][:]
+        tokens = TokenList([str(s) for s in h5f['charset'][:]])
         if props:
             props_train = h5f['properties/train'][:]
             props_test = h5f['properties/test'][:]
-            data_train = [data_train, props_train]
-            data_test = [data_test, props_test]
-        tokens = TokenList([str(s) for s in h5f['charset'][:]])
+            # data_train = [data_train, props_train]
+            # data_test = [data_test, props_test]
+            return data_train, data_test, props_train, props_test, tokens
+        else:
+            return data_train, data_test, None, None, tokens
 
-    return data_train, data_test, tokens
 
 def load_properties(filename):
     with h5py.File(filename, 'r') as h5f:
@@ -330,10 +332,16 @@ def calculateScore(m):
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-rdkit_funcs = {"QED": lambda x: QED(Chem.MolFromSmiles(x)),
-               "MOLWT": lambda x: MolWt(Chem.MolFromSmiles(x)),
-               "SAS": lambda x: calculateScore(Chem.MolFromSmiles(x)),
-               "LOGP": lambda x: LogP(Chem.MolFromSmiles(x))}
+def str2mol(s):
+    if isinstance(s, str):
+        return Chem.MolFromSmiles(s)
+    else:
+        return s
+
+rdkit_funcs = {"QED": lambda x: QED(str2mol(x)),
+               "MOLWT": lambda x: MolWt(str2mol(x)),
+               "SAS": lambda x: calculateScore(str2mol(x)),
+               "LOGP": lambda x: LogP(str2mol(x))}
 
 
 class AttnParams:
@@ -353,7 +361,7 @@ class AttnParams:
             "kl_pretrain_epochs": 0,
             "kl_anneal_epochs": 3,
             "kl_max_weight": 10,
-            "WAE_kernel": "RBF",
+            "WAE_kernel": "IMQ_normal",
             "WAE_s": 2,
             "stddev": 1,
             "pp_weight": 1.25,
@@ -367,7 +375,7 @@ class AttnParams:
             "heads": 4,
             "layers": 1,
             "dropout": 0.1,
-            "bottleneck": "average",
+            "bottleneck": "GRU",
             "ID_d_model": None,
             "ID_d_inner_hid": None,
             "ID_heads": None,

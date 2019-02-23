@@ -151,6 +151,7 @@ def main():
     for prop in args.rdkit_props.split("/"):
         if prop in rdkit_funcs:
             print("\tComputing", prop)
+
             if len(test_props):
                 test_props = np.vstack((test_props, p([rdkit_funcs[prop](s) for s in test_str])))
                 train_props = np.vstack((train_props, p([rdkit_funcs[prop](s) for s in train_str])))

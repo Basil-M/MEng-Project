@@ -131,7 +131,7 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
     with progressbar.ProgressBar(maxval=num_seeds * num_decodings, widgets=widgets) as bar:
         for seq in data_test:
             # get mean/variance
-            mu, logvar = SeqInfer.encode.predict_on_batch(np.expand_dims(seq, 0))
+            mu, logvar = SeqInfer.model.encode.predict_on_batch(np.expand_dims(seq, 0))
             for dec_itr in range(num_decodings):
                 # c_output = output(mu,logvar)
                 s = output(mu, logvar)

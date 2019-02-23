@@ -26,8 +26,8 @@ RANDOM_SEED = 1403
 DATA = 'data/zinc_100k.h5'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
-MODEL_ARCH = 'VAE'
-MODEL_NAME = 'gru100k_props'
+MODEL_ARCH = 'TRANSFORMER'
+MODEL_NAME = 'transtest3'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -134,10 +134,23 @@ def get_arguments():
 def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_test=None, model_dir=None,
                      callbacks=None):
     if data_file:
-        data_train, data_test, tokens = load_dataset(data_file, "TRANSFORMER", params["pp_weight"])
+        data_train, data_test, props_train, props_test, tokens = load_dataset(data_file, "TRANSFORMER",
+                                                                              params["pp_weight"])
+        if params["bottleneck"] == "GRU":
+            data_train_onehot, data_test_onehot, _, _, _ = load_dataset(data_file, "GRU", False)
+            data_train = [data_train_onehot, data_train]
+            data_test = [data_test_onehot, data_test]
+        else:
+            data_train = [data_train, data_train]
+            data_test = [data_test, data_test]
+
+        # add properties
+        if props_train is not None:
+            data_train.append(props_train)
+            data_test.append(props_test)
 
     if params["pp_weight"]:
-        params["num_props"] = np.shape(data_test[1])[1]
+        params["num_props"] = np.shape(data_test[2])[1]
 
     if callbacks is None:
         callbacks = ["checkpoint", "best_checkpoint", "tensorboard", "var_anneal", "epoch_track"]

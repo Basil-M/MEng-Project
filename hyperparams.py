@@ -7,7 +7,6 @@ from hyperas import optim
 from hyperas.distributions import quniform
 from hyperopt import Trials, STATUS_OK, tpe
 
-import dataloader as dd
 import utils
 from train import trainTransformer
 
@@ -27,14 +26,12 @@ def data():
     won't reload data for each evaluation run.
     """
 
-    d_file = 'data/zinc_100k.txt'
-    tokens = dd.MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
-    data_train, data_test, props_train, props_test = dd.MakeSmilesData(d_file, tokens=tokens,
-                                                                       h5_file=d_file.replace('.txt',
-                                                                                              '_data.h5'))
-    x_train = [data_train, props_train]
+    d_file = 'data/zinc_100k.h5'
+    data_train, data_test, props_train, props_test, tokens = utils.load_dataset(d_file, "TRANSFORMER", True)
+
+    x_train = [data_train, data_train, props_train]
     y_train = None
-    x_test = [data_test, props_test]
+    x_test = [data_test, data_test, props_test]
     y_test = None
     return x_train, y_train, x_test, y_test
 
@@ -60,7 +57,7 @@ def create_model(x_train, y_train, x_test, y_test):
 
     ## PARAMETERS
     params = utils.AttnParams()
-    params["latent_dim"] = 296
+    params["latent_dim"] = 72
     params["bottleneck"] = "average"
     params["kl_pretrain_epochs"] = 1
     params["kl_anneal_epochs"] = 2
@@ -69,9 +66,9 @@ def create_model(x_train, y_train, x_test, y_test):
     params["epochs"] = 3
 
     # model params to change
-    d_model = {{quniform(64, 512, 4)}}
+    d_model = {{quniform(80, 154, 4)}}
     d_inner_hid = {{quniform(128, 2048, 4)}}
-    d_k = {{quniform(4, 100, 1)}}
+    d_k = {{quniform(4, 36, 2)}}
     layers = {{quniform(1, 7, 1)}}
     # warmup = {{quniform(6000, 20000, 100)}}
 
@@ -86,15 +83,17 @@ def create_model(x_train, y_train, x_test, y_test):
     params["heads"] = int(np.ceil(d_model / d_k))
     params.setIDparams()
     # GET TOKENS
-    d_file = 'data/zinc_100k.txt'
-    tokens = dd.MakeSmilesDict(d_file, dict_file='data/SMILES_dict.txt')
+    _,_,_,_, tokens = utils.load_dataset('data/zinc_100k.h5', "TRANSFORMER", True)
 
-    model, result = trainTransformer(params, tokens=tokens, data_train=x_train, data_test=x_train,
+    model, result = trainTransformer(params, tokens=tokens, data_train=x_train, data_test=x_test,
                                      callbacks=["var_anneal"])
 
     # get the highest validation accracy of the training epochs
     validation_acc = np.amax(result.history['val_acc'])
-    print('Best validation acc of epoch:', validation_acc)
+
+    print("Best validation acc:", validation_acc)
+    print("Params were:")
+    params.dump()
     return {'loss': -validation_acc, 'status': STATUS_OK, 'model': model.autoencoder}
 
 
@@ -105,7 +104,7 @@ if __name__ == '__main__':
                                           max_evals=5,
                                           trials=Trials())
     X_train, Y_train, X_test, Y_test = data()
-    print("Evalutation of best performing model:")
-    print(best_model.evaluate(X_test, Y_test))
     print("Best performing model chosen hyper-parameters:")
     print(best_run)
+    print("Evaluation of best performing model:")
+    print(best_model.evaluate(X_test, Y_test))
