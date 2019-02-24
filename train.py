@@ -27,7 +27,7 @@ DATA = 'data/zinc_100k.h5'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'avgnew'
+MODEL_NAME = 'avgnew2'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -175,7 +175,13 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
         with tf.device("/cpu:0"):
             model = model_arch(tokens, params)
             model.build_models()
+            
     model.compile_vae(Adam(0.001, 0.9, 0.98, epsilon=1e-9, clipnorm=1.0, clipvalue=0.5), N_GPUS=N_GPUS)
+
+    if params["current_epoch"] != 0:
+        if os.path.exists(model_dir + "best_model.h5"):
+            model.autoencoder.load_weights(model_dir + "best_model.h5", by_name=True)
+
     # Set up callbacks
     # Learning rate scheduler
     cb = []
