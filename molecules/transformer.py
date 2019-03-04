@@ -248,7 +248,6 @@ class AvgLatent():
         self.after_avg = Dense(latent_dim, input_shape=(latent_dim,))
         self.mean_layer = Dense(latent_dim, input_shape=(latent_dim,), name='mean_layer')
         self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer')
-        self.mult = Multiply()
 
     def __call__(self, encoder_output):
         # encoder output should be [batch size, length, d_model]
@@ -264,6 +263,64 @@ class AvgLatent():
         h = Lambda(lambda x: K.squeeze(x, 1))(h)
         h = self.after_avg(h)
         return self.mean_layer(h), self.logvar_layer(h)
+
+class SumLatent():
+    def __init__(self, d_model, latent_dim):
+        self.layers = [TimeDistributed(Dense(d_model, input_shape=(d_model,), activation='relu')) for _ in range(1)]
+        self.avg = Lambda(lambda x: tf.reduce_sum(x, axis=1))
+        self.attn = Dense(1, input_shape=(d_model,), activation='linear')
+        self.after_avg = Dense(latent_dim, input_shape=(latent_dim,))
+        self.mean_layer = Dense(latent_dim, input_shape=(latent_dim,), name='mean_layer')
+        self.logvar_layer1 = Dense(latent_dim, input_shape=(latent_dim,),activation='tanh', name='logvar_layer_sig')
+        self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer')
+        self.mult = Multiply()
+
+    def __call__(self, encoder_output):
+        # encoder output should be [batch size, length, d_model]
+        h = encoder_output
+        for layer in self.layers:
+            h = layer(h)
+        h = debugPrint(h, "TRANSFORMED ENC_OUT:")
+
+        a_vals = self.attn(h)  # will be [batch_size, 1, length]
+        a_vals = debugPrint(a_vals, "ATTENTION VALUES")
+
+        #a_vals = Softmax(axis=1)(a_vals)
+        h = Dot(axes=1)([a_vals, h])
+        h = debugPrint(h, "Dotted vals")
+
+        h = Lambda(lambda x: K.squeeze(x, 1))(h)
+        h = self.after_avg(h)
+        h = debugPrint(h, "After_avg")
+
+        m = self.mean_layer(h)
+        l = self.logvar_layer(self.logvar_layer1(h))
+        # return self.mean_layer(h), self.logvar_layer(h)
+        return debugPrint(m, "MEAN"), debugPrint(l, "LOGVAR")
+
+class SumLatent2():
+    def __init__(self, d_model, latent_dim):
+        self.keys = TimeDistributed(Dense(latent_dim, input_shape=(d_model,), activation='linear'))
+        self.queries = TimeDistributed(Dense(latent_dim, input_shape=(d_model,), activation='linear'))
+        self.values = TimeDistributed(Dense(latent_dim, input_shape=(d_model,), activation='linear'))
+        self.after_avg = Dense(latent_dim, input_shape=(latent_dim,))
+        self.mean_layer = Dense(latent_dim, input_shape=(latent_dim,), name='mean_layer')
+
+        self.logvar_layer1 = Dense(latent_dim, input_shape=(latent_dim,),activation='tanh', name='logvar_layer_sig')
+        self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer')
+
+    def __call__(self, encoder_output):
+        # encoder output should be [batch size, length, d_model]
+        h = encoder_output
+        key = self.keys(h)
+        query = self.queries(h)
+        value = self.values(h)
+        a_vals = Dot(axes=2)([key, query])  # [batch_size, length, 1]
+        a_vals = Lambda(lambda x: K.sum(x, axis=2))(a_vals)
+
+        h = Dot(axes=1)([a_vals, value])  # [batch_size, 1, latent_dim]
+        h = self.after_avg(h)
+        return self.mean_layer(h), self.logvar_layer(self.logvar_layer1(h))
 
 class AvgLatent2():
     def __init__(self, d_model, latent_dim):
@@ -286,6 +343,7 @@ class AvgLatent2():
         h = Dot(axes=1)([a_vals, value])  # [batch_size, 1, latent_dim]
         h = self.after_avg(h)
         return self.mean_layer(h), self.logvar_layer(h)
+
 
 class Vec2Variational():
     '''
@@ -310,7 +368,9 @@ class Vec2Variational():
             logvar = layer(logvar)
         return mean, logvar
 
+
 method = "iter"
+
 
 class InterimDecoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
