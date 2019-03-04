@@ -168,7 +168,7 @@ def load_dataset(filename, architecture="TRANSFORMER", props=False):
         pref = "cat" if architecture == "TRANSFORMER" else "onehot"
         data_train = h5f[pref + '/train'][:]
         data_test = h5f[pref + '/test'][:]
-        tokens = TokenList([str(s) for s in h5f['charset'][:]])
+        tokens = TokenList([s.decode('utf-8') for s in h5f['charset'][:]])
         if props:
             props_train = h5f['properties/train'][:]
             props_test = h5f['properties/test'][:]
@@ -184,7 +184,16 @@ def load_properties(filename):
         props_train = h5f['properties/train'][:]
         props_test = h5f['properties/test'][:]
         prop_labels = h5f['properties/names'][:]
+        means = h5f['properties/means'][:]
+        stds = h5f['properties/stds'][:]
 
+    for k in range(len(prop_labels)):
+        props_train[:,k]*=stds[k]
+        props_train[:,k]+=means[k]
+        props_test[:,k]*=stds[k]
+        props_test[:,k]+=means[k]
+
+    prop_labels = [prop.decode('utf-8') for prop in prop_labels]
     return props_train, props_test, prop_labels
 # SA SCORE
 #
@@ -361,7 +370,7 @@ class AttnParams:
             "kl_pretrain_epochs": 0,
             "kl_anneal_epochs": 3,
             "kl_max_weight": 10,
-            "WAE_kernel": "IMQ_normal",
+            "WAE_kernel": None,
             "WAE_s": 2,
             "stddev": 1,
             "pp_weight": 1.25,

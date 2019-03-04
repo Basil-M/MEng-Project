@@ -233,11 +233,18 @@ def main():
     # Get Params
     model_params = AttnParams()
     model_params.load(model_dir + "params.pkl")
+    print("Analysing model",model_dir)
+    model_params.dump()
     # Get data
     d_file = model_params["data"]
-    data_train, data_test, tokens = load_dataset(d_file, model_params["model_arch"], False)
+    if model_params["bottleneck"] == "GRU" or model_params["model_arch"] == "VAE":
+        d_type = "VAE"
+    else:
+        d_type = "TRANSFORMER"
+    data_train, data_test, props_train, props_test, tokens = load_dataset(d_file, d_type, False)
     props_train, props_test, prop_labels = load_properties(d_file)
-
+    print("prop_labels", prop_labels)
+    
     if model_params["model_arch"] == "TRANSFORMER":
         # Model is an attention based model
         model = TriTransformer(tokens, model_params)
@@ -251,7 +258,7 @@ def main():
 
     # Assess how close each dimension is to a Gaussian
     # Try to load property training data
-    if not exists(model_dir + "latents.h5"):
+    if not exists(model_dir + "latents.h5") and "dothis" == "nothanks":
         print("Generating latent representations from auto-encoder")
         z_train = model.encode_sample.predict([data_train], 64)
         z_test = model.encode_sample.predict([data_test], 64)
@@ -283,7 +290,7 @@ def main():
                                                                    beam_width=args.beam_width)  # ,
 
     print("\tValid mols:\t {:.2f}".format(frac_valid))
-    for key in rdkit_funcs:
+    for (i, key) in enumerate(rdkit_funcs):
         if key in prop_labels:
             k = prop_labels.index(key)
 
@@ -291,7 +298,7 @@ def main():
             dat = props_test[:, k]
             print("\t\tTest distribution:\t {:.2f} ± {:.2f}".format(np.mean(dat), np.std(dat)))
 
-            gen_dat = gen_props[:, k]
+            gen_dat = gen_props[:, i]
             print("\t\tGenerated distribution:\t {:.2f} ± {:.2f}".format(np.mean(gen_dat), np.std(gen_dat)))
 
 
