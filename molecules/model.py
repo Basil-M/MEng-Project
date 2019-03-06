@@ -99,7 +99,8 @@ class TriTransformer:
                                weights=[tr.GetPosEncodingMatrix(params["len_limit"], params["d_model"])])
         word_emb = tr.Embedding(self.o_tokens.num(), self.p["d_model"])
         self.decode = None
-        self.encoder = None if self.p["bottleneck"] == "GRU" else TransformerEncoder(params=params, tokens=i_tokens, pos_emb=pos_emb, word_emb=word_emb)
+        self.encoder = None if self.p["bottleneck"] == "GRU" else TransformerEncoder(params=params, tokens=i_tokens,
+                                                                                     pos_emb=pos_emb, word_emb=word_emb)
         # self.encoder =
         self.kl_loss_var = K.variable(0.0, dtype=np.float, name='kl_loss_weight') if self.p["stddev"] else None
 
@@ -472,8 +473,9 @@ class TriTransformer:
                                          expected_rbf(prior_mu, prior_var) -
                                          2 * expected_rbf(mu, var, prior_mu, prior_var))
 
-#from tensor2tensor.models import transformer
-#from tensor2tensor.models.transformer import Transformer, TransformerEncoder
+
+# from tensor2tensor.models import transformer
+# from tensor2tensor.models.transformer import Transformer, TransformerEncoder
 
 class T2Transformer:
     def __init__(self, i_tokens, params, o_tokens=None):
@@ -488,7 +490,8 @@ class T2Transformer:
 
         # self.transformer = TransformerEncoder(params, tokens, pos_emb, word_emb)
         self.decode = None
-        self.encoder = None if self.p["bottleneck"] == "GRU" else TransformerEncoder(params=params, tokens=i_tokens, pos_emb=pos_emb, word_emb=word_emb)
+        self.encoder = None if self.p["bottleneck"] == "GRU" else TransformerEncoder(params=params, tokens=i_tokens,
+                                                                                     pos_emb=pos_emb, word_emb=word_emb)
         # self.encoder =
         self.kl_loss_var = K.variable(0.0, dtype=np.float, name='kl_loss_weight') if self.p["stddev"] else None
 
@@ -866,7 +869,6 @@ class T2Transformer:
                                          2 * expected_rbf(mu, var, prior_mu, prior_var))
 
 
-
 class TransformerEncoder():
     def __init__(self, params, tokens, pos_emb, word_emb):
         self.p = params
@@ -877,9 +879,9 @@ class TransformerEncoder():
         # # self.false_embedder = tr.FalseEmbeddings(d_emb=self.d_model)
         # if kl_loss_var is not None:
         #     stddev = params["stddev"] * kl_loss_var / params["kl_max_weight"]
-
+        self.word_emb = word_emb
         if params["bottleneck"] == "average":
-            self.encoder_to_latent = tr.SumLatent(params["d_model"], params["latent_dim"])
+            self.encoder_to_latent = tr.AvgLatent2(params["d_model"], params["latent_dim"])
         elif params["bottleneck"] == "interim_decoder":
             latent_pos_emb = tr.Embedding(params["latent_dim"], params["ID_d_model"], trainable=False)
             self.encoder_to_latent = tr.InterimDecoder4(params["ID_d_model"], params["ID_d_inner_hid"],
@@ -903,7 +905,8 @@ class TransformerEncoder():
             # z_mean, z_logvar, z_sampled = self.encoder_to_latent(src_seq, enc_output) # for ID1
             z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)  # everything else
         else:
-            z_mean, z_logvar = self.encoder_to_latent(enc_output)
+            z_mean, z_logvar = self.encoder_to_latent(self.word_emb(src_seq), enc_output)
+            #z_mean, z_logvar = self.encoder_to_latent(enc_output)
 
         return z_mean, z_logvar, enc_attn
 

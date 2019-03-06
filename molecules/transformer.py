@@ -327,24 +327,51 @@ class SumLatent2():
 
 class AvgLatent2():
     def __init__(self, d_model, latent_dim):
-        self.keys = TimeDistributed(Dense(latent_dim, input_shape=(d_model,), activation='linear'))
-        self.queries = TimeDistributed(Dense(latent_dim, input_shape=(d_model,), activation='linear'))
-        self.values = TimeDistributed(Dense(latent_dim, input_shape=(d_model,), activation='linear'))
-        self.after_avg = Dense(latent_dim, input_shape=(latent_dim,))
+        self.latent_dim = latent_dim
+        n_layers = 2
+        rep = lambda x: [x for _ in range(2)]
+        self.keys = rep(
+            [TimeDistributed(Dense(latent_dim, input_shape=(latent_dim if i else d_model,), activation='relu')) for i in
+             range(n_layers)])
+        self.queries = rep(
+            [TimeDistributed(Dense(latent_dim, input_shape=(latent_dim if i else d_model,), activation='relu')) for i in
+             range(n_layers)])
+        self.values = rep(
+            [TimeDistributed(Dense(latent_dim, input_shape=(latent_dim if i else d_model,), activation='relu')) for i in
+             range(n_layers)])
+        self.balance = Dense(latent_dim,input_shape=(latent_dim,), activation='relu')
+        self.balance2 = Dense(1, input_shape=(latent_dim,), activation='sigmoid')
+        self.after_avg = rep(TimeDistributed(Dense(latent_dim, input_shape=(latent_dim,))))
         self.mean_layer = Dense(latent_dim, input_shape=(latent_dim,), name='mean_layer')
         self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer')
 
-    def __call__(self, encoder_output):
+    def __call__(self, src_seq, encoder_output):
         # encoder output should be [batch size, length, d_model]
-        h = encoder_output
-        key = self.keys(h)
-        query = self.queries(h)
-        value = self.values(h)
-        a_vals = Dot(axes=2)([key, query])  # [batch_size, length, 1]
-        a_vals = Lambda(lambda x: K.sum(x, axis=2))(a_vals)
-        a_vals = Softmax(axis=1)(a_vals)
-        h = Dot(axes=1)([a_vals, value])  # [batch_size, 1, latent_dim]
-        h = self.after_avg(h)
+        outs = []
+        for (i, inp) in enumerate([encoder_output, src_seq]):
+            key = inp
+            for layer in self.keys[i]:
+                key = layer(key)
+
+            query = inp
+            for layer in self.queries[i]:
+                query = layer(query)
+
+            value = inp
+            for layer in self.values[i]:
+                value = layer(value)
+
+            a_vals = Dot(axes=2)([key, query])  # [batch_size, length, 1]
+            a_vals = Lambda(lambda x: K.sum(x, axis=2) / np.sqrt(self.latent_dim))(a_vals)
+            a_vals = Softmax(axis=1)(a_vals)
+
+            h = Dot(axes=1)([a_vals, value])  # [batch_size, 1, latent_dim]
+            #h = self.after_avg[i](h)
+            outs.append(h)
+
+        w = self.balance2(self.balance(outs[0]))
+        #w = Lambda(lambda x: K.squeeze(x, axis=1))(w)
+        h = Lambda(lambda x: w * x[0] + (1 - w) * x[1])(outs)
         return self.mean_layer(h), self.logvar_layer(h)
 
 
@@ -612,8 +639,8 @@ class InterimDecoder2():
         # self.mean_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_mean_layer')
         # self.logvar_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_logvar_layer')
         P = self.latent_dim * self.d_model
-        self.mean_layer = Dense(self.latent_dim, input_shape=(P*P,), name='ID2_mean_layer')
-        self.logvar_layer = Dense(self.latent_dim, input_shape=(P*P,), name='ID2_logvar_layer')
+        self.mean_layer = Dense(self.latent_dim, input_shape=(P * P,), name='ID2_mean_layer')
+        self.logvar_layer = Dense(self.latent_dim, input_shape=(P * P,), name='ID2_logvar_layer')
         self.mean_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_mean_layer2')
         self.logvar_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_logvar_layer2')
         # For the very first vector
@@ -861,7 +888,7 @@ class InterimDecoder4():
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
 
         # Calculate 'decoder_width' means/variances from output
-        dim1 = int(2**np.ceil(np.log2(self.latent_dim)))
+        dim1 = int(2 ** np.ceil(np.log2(self.latent_dim)))
         self.mean_layer = Dense(self.latent_dim, input_shape=(dim1 * d_model,), name='ID2_mean_layer')
         self.logvar_layer = Dense(self.latent_dim, input_shape=(dim1 * d_model,), name='ID2_logvar_layer')
         self.mean_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_mean_layer2')
@@ -896,7 +923,7 @@ class InterimDecoder4():
             # will generate too many latent dimensions, so clip it
             z_embedded = self.compute_next_z(z_embedded, src_seq, enc_output)
             dim1 = int(2 ** np.ceil(np.log2(self.latent_dim)))
-            return K.reshape(z_embedded,[-1, dim1*self.d_model])
+            return K.reshape(z_embedded, [-1, dim1 * self.d_model])
 
         z_emb = Lambda(the_loop)(z_init)
         means = self.mean_layer(z_emb)
@@ -1056,6 +1083,7 @@ class FalseEmbeddingsNonTD():
 
         self.pos_seq = Lambda(lambda x: self.pos_emb(K.cumsum(K.ones([K.shape(x)[0], latent_len], 'int32'), 1) - 1))
         # self.pos_emb = None
+        self.conv_layer = Convolution1D(d_emb, int(d_emb / 2), activation=None)
 
     def __call__(self, z):
         '''
@@ -1102,76 +1130,8 @@ class FalseEmbeddingsNonTD():
         #     z = self.time_norm(z)
         #     z = self.activation(z)
         #     # z = Dropout(rate=0.4)(z)
-
-        return z
-
-
-class FalseEmbeddingsNonTD():
-    def __init__(self, d_emb, d_latent, residual=True):
-        '''
-        Given a 1D vector, attempts to create 'false' embeddings to
-        go from latent space
-        :param d_emb: dimensionality of false embeddings
-        '''
-        NUM_LAYERS = 0
-        latent_len = 50
-        self.init_layer = Dense(d_emb * latent_len, input_shape=(d_latent,))
-
-        # self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,)))
-        self.deep_layers = [Dense(d_latent, activation=ACT, input_shape=(d_latent,)) for _ in
-                            range(NUM_LAYERS)]
-
-        # self.deep_time_layers = [TimeDistributed(Dense(d_emb, activation=ACT, input_shape=(d_emb,))) for _ in
-        #                          range(NUM_LAYERS)]
-
-        # Whether or not to employ residual connection
-        self.residual = residual
-        self.activation = Lambda(lambda x: activations.relu(x))
-        self.norm = BatchNormalization()
-        # self.time_norm = TimeDistributed(BatchNormalization())
-        self.final_shape = Lambda(lambda x: K.reshape(x, [-1, latent_len, d_emb]))
-
-        # Add positional embedding?
-        train_posemb = True
-        if train_posemb:
-            self.pos_emb = Embedding(latent_len, d_emb, trainable=True)
-        else:
-            self.pos_emb = Embedding(latent_len, d_emb, trainable=False,
-                                     weights=[GetPosEncodingMatrix(latent_len, d_emb)])
-
-        self.pos_seq = Lambda(lambda x: self.pos_emb(K.cumsum(K.ones([K.shape(x)[0], latent_len], 'int32'), 1) - 1))
-        # self.pos_emb = None
-
-    def __call__(self, z):
-        '''
-
-        :param z: Input with dimensionality [batch_size, d] or [batch_size, d, 1]
-        :return: Falsely embedded output with dimensionality [batch_size, d, d_emb]
-        '''
-
-        # use fully connected layer to expand to [batch_size, d, d_emb]
-
-        for (i, layer) in enumerate(self.deep_layers):
-            if self.residual:
-                z = Add()([z, layer(z)])
-                # z = z + layer(z)
-            else:
-                z = layer(z)
-
-            z = self.norm(z)
-            # z = Lambda(lambda a: a[0] + a[1])([y, z])
-            z = self.activation(z)
-            # z = Dropout(rate=0.4)(z)
-            # arg = Multiply()([self.scales[i], arg])
-            # arg *= self.scales[i]
-            # arg = Dropout(rate=0.2)(arg)
-
-        z = self.init_layer(z)
-        z = self.final_shape(z)
-
-        if self.pos_emb:
-            z = Add()([z, self.pos_seq(z)])
-
+        # z is [batch_size, latent_len, d_model]
+        z = self.conv_layer(z)
         return z
 
 
