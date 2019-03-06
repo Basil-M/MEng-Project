@@ -23,11 +23,11 @@ NUM_EPOCHS = 20
 BATCH_SIZE = 50
 LATENT_DIM = 128
 RANDOM_SEED = 1403
-DATA = 'data/zinc_100k.h5'
+DATA = 'data/zinc_1k.h5'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'avgnew3'
+MODEL_NAME = 'test_ms'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -181,43 +181,58 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
     if params["current_epoch"] != 0 and model_dir is not None:
         if os.path.exists(model_dir + "model.h5"):
             model.autoencoder.load_weights(model_dir + "model.h5", by_name=True)
+    # Store number of params
+    params["num_params"] = model.autoencoder.count_params()
 
     # Set up callbacks
     # Learning rate scheduler
-    cb = []
-    for c in callbacks:
-        if not isinstance(c, str):
-            cb.append(c)
-        elif c == "checkpoint":
-            cb.append(ModelCheckpoint(model_dir + "model.h5", save_best_only=False,
-                                      save_weights_only=True))
-        elif c == "best_checkpoint":
-            # Best model saver
-            cb.append(ModelCheckpoint(model_dir + "best_model.h5", save_best_only=True,
-                                      save_weights_only=True))
-        elif c == "tensorboard":
-            # Tensorboard Callback
-            cb.append(TensorBoard(log_dir=model_dir + "logdir/",
-                                  histogram_freq=0,
-                                  batch_size=params["batch_size"],
-                                  write_graph=True,
-                                  write_images=True,
-                                  update_freq='batch'))
-        elif c == "var_anneal":
-            cb.append(WeightAnnealer_epoch(model.kl_loss_var,
-                                           anneal_epochs=params["kl_anneal_epochs"],
-                                           max_val=params["kl_max_weight"],
-                                           init_epochs=params["kl_pretrain_epochs"]))
-        elif c == "epoch_track":
-            callbacks.append(epoch_track(params, param_filename=model_dir + "params.pkl", csv_track=True))
 
-    cb.append(LRSchedulerPerStep(params["d_model"],
-                                 4000))  # there is a warning that it is slow, however, it's ok.
+    model_trained = False
+    n_pretrain = params["kl_pretrain_epochs"] + params["kl_anneal_epochs"]
+    while not model_trained:
+        pretraining_done = params["current_epoch"] > n_pretrain
+        cb = []
+        for c in callbacks:
+            if not isinstance(c, str):
+                cb.append(c)
+            elif c == "checkpoint":
+                cb.append(ModelCheckpoint(model_dir + "model.h5", save_best_only=False,
+                                          save_weights_only=True))
+            elif c == "best_checkpoint" and pretraining_done:
+                # Best model saver
+                # Don't include the best_checkpoint saver if the pretraining isn't done
+                # During pretraining it is likely the model may have a better validation accuracy
+                # Than when the variational objective is fully included
+                cb.append(ModelCheckpoint(model_dir + "best_model.h5", save_best_only=True,
+                                          save_weights_only=True))
+            elif c == "tensorboard":
+                # Tensorboard Callback
+                cb.append(TensorBoard(log_dir=model_dir + "logdir/",
+                                      histogram_freq=0,
+                                      batch_size=params["batch_size"],
+                                      write_graph=True,
+                                      write_images=True,
+                                      update_freq='batch'))
+            elif c == "var_anneal":
+                cb.append(WeightAnnealer_epoch(model.kl_loss_var,
+                                               anneal_epochs=params["kl_anneal_epochs"],
+                                               max_val=params["kl_max_weight"],
+                                               init_epochs=params["kl_pretrain_epochs"]))
+            elif c == "epoch_track":
+                callbacks.append(epoch_track(params, param_filename=model_dir + "params.pkl", csv_track=True))
 
-    results = model.autoencoder.fit(data_train, None, batch_size=params["batch_size"] * N_GPUS,
-                                    epochs=params["epochs"], initial_epoch=params["current_epoch"] - 1,
-                                    validation_data=(data_test, None),
-                                    callbacks=cb)
+        cb.append(LRSchedulerPerStep(params["d_model"],
+                                     4000))  # there is a warning that it is slow, however, it's ok.
+
+
+        results = model.autoencoder.fit(data_train, None, batch_size=params["batch_size"] * N_GPUS,
+                                        epochs=params["epochs"] if pretraining_done else n_pretrain,
+                                        initial_epoch=params["current_epoch"] - 1,
+                                        validation_data=(data_test, None),
+                                        callbacks=cb)
+        params["current_epoch"] += len(results.history['acc'])
+        model_trained = params["current_epoch"] > params["epochs"]
+
     return model, results
 
 
