@@ -472,7 +472,7 @@ class TriTransformer:
                                          expected_rbf(prior_mu, prior_var) -
                                          2 * expected_rbf(mu, var, prior_mu, prior_var))
 
-from tensor2tensor.models import transformer
+#from tensor2tensor.models import transformer
 #from tensor2tensor.models.transformer import Transformer, TransformerEncoder
 
 class T2Transformer:
@@ -882,7 +882,7 @@ class TransformerEncoder():
             self.encoder_to_latent = tr.SumLatent(params["d_model"], params["latent_dim"])
         elif params["bottleneck"] == "interim_decoder":
             latent_pos_emb = tr.Embedding(params["latent_dim"], params["ID_d_model"], trainable=False)
-            self.encoder_to_latent = tr.InterimDecoder2(params["ID_d_model"], params["ID_d_inner_hid"],
+            self.encoder_to_latent = tr.InterimDecoder4(params["ID_d_model"], params["ID_d_inner_hid"],
                                                         params["ID_heads"], params["ID_d_k"], params["ID_d_v"],
                                                         params["ID_layers"], params["ID_width"], params["dropout"],
                                                         stddev=1,
@@ -917,7 +917,7 @@ class SequenceInference():
             self.model.encode.load_weights(weights_file, by_name=True)
             self.model.decode.load_weights(weights_file, by_name=True)
 
-        if model.p["model_arch"] == "TRANSFORMER":
+        if model.p["model_arch"] == "TRANSFORMER" and model.p["bottleneck"] != "GRU":
             self.prepare_str = lambda x: self.tokens.tokenize(x)
         else:
             self.prepare_str = lambda x: self.tokens.onehotify(x, model.p["len_limit"])
