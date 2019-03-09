@@ -369,7 +369,7 @@ class AttnParams:
             "batch_size": 20,
             "kl_pretrain_epochs": 1,
             "kl_anneal_epochs": 1,
-            "kl_max_weight": 10,
+            "kl_max_weight": 1,
             "WAE_kernel": None,
             "WAE_s": 2,
             "stddev": 1,
@@ -384,7 +384,7 @@ class AttnParams:
             "heads": 4,
             "layers": 1,
             "dropout": 0.1,
-            "bottleneck": "interim_decoder",
+            "bottleneck": "ar2",
             "ID_d_model": None,
             "ID_d_inner_hid": None,
             "ID_heads": None,
@@ -420,7 +420,7 @@ class AttnParams:
     def setIDparams(self):
         # Will by default set interim decoder parameters
         # to have same as normal parameters
-        if self._params["bottleneck"] == "interim_decoder":
+        if "ar" in self._params["bottleneck"]:
             for key in self._params:
                 if "ID" in key:
                     if self._params[key] is None:

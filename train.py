@@ -27,7 +27,7 @@ DATA = 'data/zinc_1k.h5'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'test_ms'
+MODEL_NAME = 'testid2_again'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -85,7 +85,7 @@ def get_arguments():
     parser.add_argument('--latent_dim', type=int, metavar='N', default=default["latent_dim"],
                         help='Dimensionality of the latent representation.')
     parser.add_argument('--bottleneck', type=str, default=default["bottleneck"],
-                        help='Bottleneck architecture - average, interim_decoder')
+                        help='Bottleneck architecture - average1, average2, sum1, sum2, ar1, ar2, ar3, ar_log, conv')
 
     parser.add_argument('--ID_d_model', type=int, metavar='N', default=None,
                         help='Dimensionality of interim decoder model')
@@ -136,8 +136,8 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
     if data_file:
         data_train, data_test, props_train, props_test, tokens = load_dataset(data_file, "TRANSFORMER",
                                                                               params["pp_weight"])
-        if params["bottleneck"] == "GRU":
-            data_train_onehot, data_test_onehot, _, _, _ = load_dataset(data_file, "GRU", False)
+        if params["bottleneck"] == "conv":
+            data_train_onehot, data_test_onehot, _, _, _ = load_dataset(data_file, "conv", False)
             data_train = [data_train_onehot, data_train]
             data_test = [data_test_onehot, data_test]
         else:
@@ -149,8 +149,14 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
             data_train.append(props_train)
             data_test.append(props_test)
 
+    # Set number of properties
     if params["pp_weight"]:
         params["num_props"] = np.shape(data_test[2])[1]
+
+    # Set autoregressive parameters
+    if "ar" in params["bottleneck"]:
+        print("Setting ID params!!")
+        params.setIDparams()
 
     if callbacks is None:
         callbacks = ["checkpoint", "best_checkpoint", "tensorboard", "var_anneal", "epoch_track"]
@@ -183,7 +189,7 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
             model.autoencoder.load_weights(model_dir + "model.h5", by_name=True)
     # Store number of params
     params["num_params"] = model.autoencoder.count_params()
-
+    print("NUMBER OF PARAMETERS:", params["num_params"])
     # Set up callbacks
     # Learning rate scheduler
 
@@ -255,7 +261,7 @@ def main():
     ## VARIATIONAL AUTOENCODER
     if args.model_arch == "VAE":
         from molecules.model import MoleculeVAE
-        data_train, data_test, tokens = load_dataset(args.data, "GRU", params["pp_weight"])
+        data_train, data_test, tokens = load_dataset(args.data, "conv", params["pp_weight"])
         if params["pp_weight"]:
             params["num_props"] = np.shape(data_test[1])[1]
             data_train_in = data_train[0]

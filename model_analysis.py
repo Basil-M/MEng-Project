@@ -237,7 +237,7 @@ def main():
     model_params.dump()
     # Get data
     d_file = model_params["data"]
-    if model_params["bottleneck"] == "GRU" or model_params["model_arch"] == "VAE":
+    if model_params["bottleneck"] == "conv" or model_params["model_arch"] == "VAE":
         d_type = "VAE"
     else:
         d_type = "TRANSFORMER"
