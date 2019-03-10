@@ -854,9 +854,11 @@ class InterimDecoder4():
         self.logvar_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_logvar_layer2')
 
         # For the very first vector
-        #self.attn = TimeDistributed(Dense(1, input_shape=(d_model,), activation='linear'), name='ID2_ATTN')
-        #self.vals = TimeDistributed(Dense(d_model, input_shape=(d_model,)))
-        #self.squeeze = Lambda(lambda x: K.squeeze(x, axis=-1), name='ID2_SQUEEZE')
+        self.init_mode = "attention"
+        if self.init_mode == "attention":
+            self.attn = TimeDistributed(Dense(1, input_shape=(d_model,), activation='linear'), name='ID2_ATTN')
+            self.vals = TimeDistributed(Dense(d_model, input_shape=(d_model,)))
+            self.squeeze = Lambda(lambda x: K.squeeze(x, axis=-1), name='ID2_SQUEEZE')
 
         self.ldim = K.constant(latent_dim, dtype='int32')
         self.concat = Concatenate(axis=1, name='ID2_CONCAT')
@@ -929,16 +931,24 @@ class InterimDecoder4():
 
     def first_iter(self, src_seq, enc_output, return_att=False, active_layers=999):
         # We generate the first [width] vectors using a weighted average of the encoder output
-        #a_vals = self.attn(enc_output)
-        #a_vals = Softmax(axis=1)(a_vals)
-        #h = Dot(axes=1)([a_vals, self.vals(enc_output)])
-        def get_zeros(arg):
-            bs = K.shape(arg)[0]
-            return K.zeros([bs, 1, self.d_model], dtype='float')
+        if self.init_mode == "attention":
+            a_vals = self.attn(enc_output)
+            a_vals = Softmax(axis=1)(a_vals)
+            z = Dot(axes=1)([a_vals, self.vals(enc_output)])
+        elif self.init_mode == "zeros":
+            def get_zeros(arg):
+                bs = K.shape(arg)[0]
+                return K.zeros([bs, 1, self.d_model], dtype='float')
 
-        z = Lambda(get_zeros)(src_seq)
+            z = Lambda(get_zeros)(src_seq)
+        elif self.init_mode == "random":
+            def get_zeros(arg):
+                bs = K.shape(arg)[0]
+                return K.random_normal([bs, 1, self.d_model], stddev=0.01, dtype='float')
 
-        # h is now [batch_size, width, d_model]
+            z = Lambda(get_zeros)(src_seq)
+
+        # z is now [batch_size, 1, d_model]
         # The code in "step" must be run at least once
         # Outside the loop just to make Keras happy
         return self.compute_next_z(z, src_seq, enc_output)
