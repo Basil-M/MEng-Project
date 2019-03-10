@@ -854,9 +854,9 @@ class InterimDecoder4():
         self.logvar_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_logvar_layer2')
 
         # For the very first vector
-        self.attn = TimeDistributed(Dense(1, input_shape=(d_model,), activation='linear'), name='ID2_ATTN')
-        self.vals = TimeDistributed(Dense(d_model, input_shape=(d_model,)))
-        self.squeeze = Lambda(lambda x: K.squeeze(x, axis=-1), name='ID2_SQUEEZE')
+        #self.attn = TimeDistributed(Dense(1, input_shape=(d_model,), activation='linear'), name='ID2_ATTN')
+        #self.vals = TimeDistributed(Dense(d_model, input_shape=(d_model,)))
+        #self.squeeze = Lambda(lambda x: K.squeeze(x, axis=-1), name='ID2_SQUEEZE')
 
         self.ldim = K.constant(latent_dim, dtype='int32')
         self.concat = Concatenate(axis=1, name='ID2_CONCAT')
@@ -929,16 +929,20 @@ class InterimDecoder4():
 
     def first_iter(self, src_seq, enc_output, return_att=False, active_layers=999):
         # We generate the first [width] vectors using a weighted average of the encoder output
-        a_vals = self.attn(enc_output)
-        a_vals = Softmax(axis=1)(a_vals)
-        h = Dot(axes=1)([a_vals, self.vals(enc_output)])
+        #a_vals = self.attn(enc_output)
+        #a_vals = Softmax(axis=1)(a_vals)
+        #h = Dot(axes=1)([a_vals, self.vals(enc_output)])
+        def get_zeros(arg):
+            bs = K.shape(arg)[0]
+            return K.zeros([bs, 1, self.d_model], dtype='float')
+
+        z = Lambda(get_zeros)(src_seq)
 
         # h is now [batch_size, width, d_model]
         # The code in "step" must be run at least once
         # Outside the loop just to make Keras happy
-        h = self.compute_next_z(h, src_seq, enc_output)
+        return self.compute_next_z(z, src_seq, enc_output)
 
-        return h
 
     def cond(self, z_so_far, src_seq, enc_output):
         # Return true while mean length is less than latent dim
