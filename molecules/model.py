@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 from keras import backend as K
 from keras import objectives
-from keras.layers import Input, Lambda
+from keras.layers import Input, Lambda, Dot
 from keras.layers.convolutional import Convolution1D
 from keras.layers.core import Dense, Flatten, RepeatVector
 from keras.layers.recurrent import GRU
@@ -97,10 +97,13 @@ class TriTransformer:
 
         pos_emb = tr.Embedding(params["len_limit"], params["d_model"], trainable=False,
                                weights=[tr.GetPosEncodingMatrix(params["len_limit"], params["d_model"])])
-        word_emb = tr.Embedding(self.o_tokens.num(), self.p["d_model"])
+        self.word_emb = tr.Embedding(self.o_tokens.num(), self.p["d_model"])
         self.decode = None
-        self.encoder = None if self.p["bottleneck"] == "conv" else TransformerEncoder(params=params, tokens=i_tokens,
-                                                                                     pos_emb=pos_emb, word_emb=word_emb)
+        if self.p["bottleneck"] == "conv" or self.p["bottleneck"] == "gru":
+            self.encoder = None
+        else:
+            self.encoder = TransformerEncoder(params=params, tokens=i_tokens,
+                                              pos_emb=pos_emb, word_emb=self.word_emb)
         # self.encoder =
         self.kl_loss_var = K.variable(0.0, dtype=np.float, name='kl_loss_weight') if self.p["stddev"] else None
 
@@ -124,13 +127,32 @@ class TriTransformer:
         self.decoder = tr.DecoderFromLatent(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"], self.p["d_k"],
                                             self.p["d_v"],
                                             self.p["layers"], self.p["dropout"],
-                                            word_emb=word_emb, pos_emb=pos_emb)
+                                            word_emb=self.word_emb, pos_emb=pos_emb)
 
         self.target_layer = TimeDistributed(Dense(self.o_tokens.num(), use_bias=False))
 
         self.metrics = {}
 
     def _buildGRUEncoder(self, x):
+        h = self.word_emb(x)
+        # For now, avoid having to introduce new commandline parameters
+        for _ in range(self.p["ID_layers"]):
+            h = GRU(self.p["ID_d_k"], return_sequences=True)(h)
+
+        values = TimeDistributed(Dense(self.p["latent_dim"]))(h)
+        queries = TimeDistributed(Dense(self.p["latent_dim"]))(h)
+        keys = TimeDistributed(Dense(self.p["latent_dim"]))(h)
+
+        attn_vals = Dot(axes=2)([keys, queries])
+        attn_vals = Lambda(lambda x: K.sum(x, axis=2, keepdims=True))(attn_vals)
+
+        h = Dot(axes=1)([attn_vals, values])
+        h = Lambda(lambda x: K.squeeze(x, axis=1))(h)
+        z_mean = Dense(self.p["latent_dim"], name='z_mean', activation='linear')(h)
+        z_log_var = Dense(self.p["latent_dim"], name='z_log_var', activation='linear')(h)
+        return z_mean, z_log_var
+
+    def _buildConvEncoder(self, x):
         h = Convolution1D(9, 9, activation='relu')(x)
         h = Convolution1D(9, 9, activation='relu')(h)
         h = Convolution1D(10, 11, activation='relu')(h)
@@ -153,9 +175,13 @@ class TriTransformer:
         tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
 
         if self.encoder is None:
-            src_seq = Input(shape=(self.p["len_limit"], self.i_tokens.num()), name='src_seq')
             enc_attn = None
-            z_mean, z_logvar = self._buildGRUEncoder(src_seq)
+            if self.p["bottleneck"] == "gru":
+                src_seq = Input(shape=(None,), dtype='int32', name='src_seq')
+                z_mean, z_logvar = self._buildGRUEncoder(src_seq)
+            else:
+                src_seq = Input(shape=(self.p["len_limit"], self.i_tokens.num()), name='src_seq')
+                z_mean, z_logvar = self._buildConvEncoder(src_seq)
             z_sampled = None
         else:
             src_seq = Input(shape=(None,), dtype='int32', name='src_seq')
@@ -514,7 +540,7 @@ class TransformerEncoder():
         z_s = None
         if self.p["bottleneck"] == "ar1":
             z_mean, z_logvar, z_s = self.encoder_to_latent(src_seq, enc_output)
-        elif "ar" in  self.p["bottleneck"]:
+        elif "ar" in self.p["bottleneck"]:
             z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
         else:
             z_mean, z_logvar = self.encoder_to_latent(enc_output)

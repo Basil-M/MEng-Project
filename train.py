@@ -23,11 +23,11 @@ NUM_EPOCHS = 20
 BATCH_SIZE = 50
 LATENT_DIM = 128
 RANDOM_SEED = 1403
-DATA = 'data/zinc_1k.h5'
+DATA = 'data/zinc_100k.h5'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'testconv'
+MODEL_NAME = 'testgruj4'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
