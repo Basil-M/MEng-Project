@@ -380,7 +380,7 @@ class InterimDecoder():
         # False embedder to go from latent dim to what decoder expects
         if false_emb is None:
             # Don't share embedder with AK
-            self.false_embedder = FalseEmbeddingsTD(d_model,1)
+            self.false_embedder = FalseEmbeddingsTD(d_model, 1)
         else:
             self.false_embedder = false_emb
 
@@ -848,10 +848,11 @@ class InterimDecoder4():
 
         # Calculate 'decoder_width' means/variances from output
         dim1 = int(2 ** np.ceil(np.log2(self.latent_dim)))
-        self.mean_layer = Dense(self.latent_dim, input_shape=(dim1 * d_model,), name='ID2_mean_layer')
-        self.logvar_layer = Dense(self.latent_dim, input_shape=(dim1 * d_model,), name='ID2_logvar_layer')
+        self.mean_layer = Dense(self.latent_dim, input_shape=(dim1 * d_model,), activation='relu', name='ID2_mean_layer')
+        self.logvar_layer = Dense(self.latent_dim, input_shape=(dim1 * d_model,), activation='relu',  name='ID2_logvar_layer')
         self.mean_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_mean_layer2')
         self.logvar_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_logvar_layer2')
+
         # For the very first vector
         self.attn = TimeDistributed(Dense(1, input_shape=(d_model,), activation='linear'), name='ID2_ATTN')
         self.vals = TimeDistributed(Dense(d_model, input_shape=(d_model,)))
@@ -948,8 +949,9 @@ class InterimDecoder4():
         pos = K.cumsum(K.ones_like(x, 'int32'), 1)
         return pos * mask
 
+
 class FalseEmbeddingsTD():
-    def __init__(self, d_emb, residual = True, layers=0):
+    def __init__(self, d_emb, residual=True, layers=0):
         '''
         Given a 1D vector, attempts to create 'false' embeddings to
         go from latent space
@@ -958,14 +960,15 @@ class FalseEmbeddingsTD():
 
         self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,)))
         self.deep_layers = [TimeDistributed(Dense(d_emb, activation='relu', input_shape=(d_emb,))) for _ in
-                                 range(layers)]
+                            range(layers)]
 
         # Whether or not to employ residual connection
         self.residual = residual
         if self.residual:
             self.deep_res_layers = [TimeDistributed(Dense(d_emb, input_shape=(d_emb,))) for _ in
-                                         range(layers)]
+                                    range(layers)]
         self.final_lin = TimeDistributed(Dense(d_emb, input_shape=(d_emb,)))
+
     def __call__(self, z):
         '''
         :param z: Input with dimensionality [batch_size, d] or [batch_size, d, 1]
@@ -990,6 +993,7 @@ class FalseEmbeddingsTD():
                 z = TimeDistributed(BatchNormalization)(z)
 
         return self.final_lin(z)
+
 
 class FalseEmbeddings():
     def __init__(self, d_emb, d_latent, residual=True, layers=0):

@@ -134,6 +134,7 @@ class TriTransformer:
         h = Convolution1D(9, 9, activation='relu')(x)
         h = Convolution1D(9, 9, activation='relu')(h)
         h = Convolution1D(10, 11, activation='relu')(h)
+        h = Convolution1D(10, 11, activation='relu')(h)
         h = Flatten(name='flatten_1')(h)
         h = Dense(435, activation='relu')(h)
         z_mean = Dense(self.p["latent_dim"], name='z_mean', activation='linear')(h)

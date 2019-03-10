@@ -27,7 +27,7 @@ DATA = 'data/zinc_1k.h5'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'testid2_again'
+MODEL_NAME = 'testconv'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -66,11 +66,11 @@ def get_arguments():
                         help='Model architecture to use - options are VAE, TRANSFORMER')
     parser.add_argument('--base_lr', type=float, metavar='0.001', default=0.001,
                         help='Base training rate for ADAM optimizer')
-    parser.add_argument('--kl_pretrain_epochs', type=float, metavar='1', default=default["kl_pretrain_epochs"],
+    parser.add_argument('--kl_pretrain_epochs', type=int, metavar='1', default=default["kl_pretrain_epochs"],
                         help='Number of epochs to train before introducing KL loss')
-    parser.add_argument('--kl_anneal_epochs', type=float, metavar='5', default=default["kl_anneal_epochs"],
+    parser.add_argument('--kl_anneal_epochs', type=int, metavar='5', default=default["kl_anneal_epochs"],
                         help='Number of epochs to anneal over')
-    parser.add_argument('--kl_max_weight', type=float, metavar='1', default=default["kl_max_weight"],
+    parser.add_argument('--kl_max_weight', type=int, metavar='1', default=default["kl_max_weight"],
                         help='Maximum KL weight')
     parser.add_argument('--WAE_kernel', type=str, metavar="IMQ_normal", default=default["WAE_kernel"],
                         help='Kernel for Wasserstein distance - options are RBF, IMQ_normal, IMQ_sphere and IMQ_uniform')
@@ -188,7 +188,7 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
         if os.path.exists(model_dir + "model.h5"):
             model.autoencoder.load_weights(model_dir + "model.h5", by_name=True)
     # Store number of params
-    params["num_params"] = model.autoencoder.count_params()
+    params["num_params"] = model.encode.count_params()
     print("NUMBER OF PARAMETERS:", params["num_params"])
     # Set up callbacks
     # Learning rate scheduler

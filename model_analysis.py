@@ -211,7 +211,6 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1):
                     # keep if unique
                     if mol not in output_molecules:
                         output_molecules.append(mol)
-                        print("GENERATED ", mol)
                         mol = Chem.MolFromSmiles(mol)
                         # mol is None if it wasn't a valid SMILES string
                         if mol:

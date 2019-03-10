@@ -384,7 +384,7 @@ class AttnParams:
             "heads": 4,
             "layers": 1,
             "dropout": 0.1,
-            "bottleneck": "ar2",
+            "bottleneck": "average1",
             "ID_d_model": None,
             "ID_d_inner_hid": None,
             "ID_heads": None,
