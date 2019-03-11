@@ -528,7 +528,9 @@ class TransformerEncoder():
                                                                           latent_dim=params["latent_dim"],
                                                                           pos_emb=latent_pos_emb,
                                                                           false_emb=None)
-
+        elif params["bottleneck"] == "grut":
+            print("Itsa gru!")
+            self.encoder_to_latent = GRU(params["latent_dim"], return_sequences=False)
         elif params["bottleneck"] == "none":
             self.encoder_to_latent = tr.Vec2Variational(params["d_model"], params["len_limit"])
 
@@ -542,6 +544,10 @@ class TransformerEncoder():
             z_mean, z_logvar, z_s = self.encoder_to_latent(src_seq, enc_output)
         elif "ar" in self.p["bottleneck"]:
             z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
+        elif self.p["bottleneck"] == "transgru":
+            h = self.encoder_to_latent(enc_output)
+            z_mean = Dense(self.p["latent_dim"])(h)
+            z_logvar = Dense(self.p["latent_dim"])(h)
         else:
             z_mean, z_logvar = self.encoder_to_latent(enc_output)
 
