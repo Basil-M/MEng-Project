@@ -6,7 +6,8 @@ import numpy as np
 from hyperas import optim
 from hyperas.distributions import quniform
 from hyperopt import Trials, STATUS_OK, tpe
-
+from model_analysis import property_distributions as PD
+from molecules.model import SequenceInference
 import utils
 from train import trainTransformer
 
@@ -57,19 +58,19 @@ def create_model(x_train, y_train, x_test, y_test):
 
     ## PARAMETERS
     params = utils.AttnParams()
-    params["latent_dim"] = 72
-    params["bottleneck"] = "average"
-    params["kl_pretrain_epochs"] = 1
-    params["kl_anneal_epochs"] = 2
+    params["latent_dim"] = 60
+    params["bottleneck"] = "average1"
+    params["kl_pretrain_epochs"] = 0
+    params["kl_anneal_epochs"] = 0
     params["ID_width"] = 4
     params["batch_size"] = 50
-    params["epochs"] = 3
+    params["epochs"] = 1
 
     # model params to change
-    d_model = {{quniform(80, 154, 4)}}
+    d_model = {{quniform(60, 150, 2)}}
     d_inner_hid = {{quniform(128, 2048, 4)}}
     d_k = {{quniform(4, 36, 2)}}
-    layers = {{quniform(1, 7, 1)}}
+    layers = {{quniform(1, 4, 1)}}
     # warmup = {{quniform(6000, 20000, 100)}}
 
     params["d_model"] = int(d_model)
@@ -79,7 +80,6 @@ def create_model(x_train, y_train, x_test, y_test):
     params["pp_weight"] = 1.25
     # Automatically set params from above
     params["d_v"] = params["d_k"]
-    params["d_q"] = params["d_k"]
     params["heads"] = int(np.ceil(d_model / d_k))
     params.setIDparams()
     # GET TOKENS
@@ -88,13 +88,19 @@ def create_model(x_train, y_train, x_test, y_test):
     model, result = trainTransformer(params, tokens=tokens, data_train=x_train, data_test=x_test,
                                      callbacks=["var_anneal"])
 
-    # get the highest validation accracy of the training epochs
+    # get the highest validation accuracy of the training epochs
     validation_acc = np.amax(result.history['val_acc'])
-
-    print("Best validation acc:", validation_acc)
-    print("Params were:")
+    SeqInfer = SequenceInference(model, tokens)
+    gen_props, data_props, frac_valid = PD(x_train[0], x_train[-1],
+                                           num_seeds=300,
+                                           num_decodings=3,
+                                           SeqInfer=SeqInfer,
+                                           beam_width=5)
+    print("With params:")
     params.dump()
-    return {'loss': -validation_acc, 'status': STATUS_OK, 'model': model.autoencoder}
+    print("Validation acc:", validation_acc, "Fraction valid:", frac_valid)
+
+    return {'loss': -frac_valid, 'status': STATUS_OK, 'model': model.autoencoder}
 
 
 if __name__ == '__main__':
