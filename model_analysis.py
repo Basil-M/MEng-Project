@@ -137,18 +137,17 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
                 s = output(mu, logvar)
                 if s.ndim > 1: s = s[:, 0]
 
-                with supress_stderr():
-                    for mol in s:
-                        # keep if unique
-                        if mol not in output_molecules:
-                            output_molecules.append(mol)
-                            mol = Chem.MolFromSmiles(mol)
-                            # mol is None if it wasn't a valid SMILES string
-                            if mol:
-                                try:
-                                    gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
-                                except:
-                                    print("Could not calculate properties for {}".format(Chem.MolToSmiles(mol)))
+                for mol in s:
+                    # keep if unique
+                    if mol not in output_molecules:
+                        output_molecules.append(mol)
+                        mol = Chem.MolFromSmiles(mol)
+                        # mol is None if it wasn't a valid SMILES string
+                        if mol:
+                            try:
+                                gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
+                            except:
+                                print("Could not calculate properties for {}".format(Chem.MolToSmiles(mol)))
                 bar_i += 1
                 bar.update(bar_i)
 
@@ -206,18 +205,17 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1):
             s = output(z_i)
             if s.ndim > 1: s = s[:, 0]
 
-            with supress_stderr():
-                for mol in s:
-                    # keep if unique
-                    if mol not in output_molecules:
-                        output_molecules.append(mol)
-                        mol = Chem.MolFromSmiles(mol)
-                        # mol is None if it wasn't a valid SMILES string
-                        if mol:
-                            try:
-                                gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
-                            except:
-                                print("Could not calculate properties for {}".format(Chem.MolToSmiles(mol)))
+            for mol in s:
+                # keep if unique
+                if mol not in output_molecules:
+                    output_molecules.append(mol)
+                    mol = Chem.MolFromSmiles(mol)
+                    # mol is None if it wasn't a valid SMILES string
+                    if mol:
+                        try:
+                            gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
+                        except:
+                            print("Could not calculate properties for {}".format(Chem.MolToSmiles(mol)))
             bar.update(bar_i)
 
     print("Generated {} unique sequences, of which {} were valid.".format(len(output_molecules), len(gen_props)))
@@ -232,7 +230,7 @@ def main():
     # Get Params
     model_params = AttnParams()
     model_params.load(model_dir + "params.pkl")
-    print("Analysing model",model_dir)
+    print("Analysing model", model_dir)
     model_params.dump()
     # Get data
     d_file = model_params["data"]
@@ -243,7 +241,7 @@ def main():
     data_train, data_test, props_train, props_test, tokens = load_dataset(d_file, d_type, False)
     props_train, props_test, prop_labels = load_properties(d_file)
     print("prop_labels", prop_labels)
-    
+
     if model_params["model_arch"] == "TRANSFORMER":
         # Model is an attention based model
         model = TriTransformer(tokens, model_params)
@@ -279,14 +277,15 @@ def main():
         args.n_decodings,
         args.n_seeds))
 
-    if args.prior_sample:
-        gen_props, frac_valid = rand_mols(args.n_seeds, model_params["latent_dim"], SeqInfer, args.beam_width)
-    else:
-        gen_props, data_props, frac_valid = property_distributions(data_test, props_test,
-                                                                   num_seeds=args.n_seeds,
-                                                                   num_decodings=args.n_decodings,
-                                                                   SeqInfer=SeqInfer,
-                                                                   beam_width=args.beam_width)  # ,
+    with supress_stderr():
+        if args.prior_sample:
+            gen_props, frac_valid = rand_mols(args.n_seeds, model_params["latent_dim"], SeqInfer, args.beam_width)
+        else:
+            gen_props, data_props, frac_valid = property_distributions(data_test, props_test,
+                                                                       num_seeds=args.n_seeds,
+                                                                       num_decodings=args.n_decodings,
+                                                                       SeqInfer=SeqInfer,
+                                                                       beam_width=args.beam_width)  # ,
 
     print("\tValid mols:\t {:.2f}".format(frac_valid))
     for (i, key) in enumerate(rdkit_funcs):

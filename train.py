@@ -7,7 +7,7 @@ from os.path import exists
 
 import numpy as np
 import tensorflow as tf
-from keras import backend as k
+from keras import backend as K
 from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, TensorBoard
 from keras.optimizers import Adam
 
@@ -17,7 +17,7 @@ from utils import epoch_track, WeightAnnealer_epoch, load_dataset
 
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
-k.tensorflow_backend.set_session(tf.Session(config=config))
+K.tensorflow_backend.set_session(tf.Session(config=config))
 
 NUM_EPOCHS = 20
 BATCH_SIZE = 50
@@ -27,7 +27,7 @@ DATA = 'data/zinc_100k.h5'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'ar_logg'
+MODEL_NAME = 'avgl2'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -188,7 +188,7 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
         if os.path.exists(model_dir + "model.h5"):
             model.autoencoder.load_weights(model_dir + "model.h5", by_name=True)
     # Store number of params
-    params["num_params"] = model.encode.count_params()
+    params["num_params"] = int(np.sum([K.count_params(p) for p in set(model.encode.trainable_weights)]))
     print("NUMBER OF PARAMETERS:", params["num_params"])
     # Set up callbacks
     # Learning rate scheduler
@@ -229,7 +229,6 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
 
         cb.append(LRSchedulerPerStep(params["d_model"],
                                      4000))  # there is a warning that it is slow, however, it's ok.
-
 
         results = model.autoencoder.fit(data_train, None, batch_size=params["batch_size"] * N_GPUS,
                                         epochs=params["epochs"] if pretraining_done else n_pretrain,

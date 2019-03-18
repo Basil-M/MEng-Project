@@ -339,6 +339,30 @@ class AvgLatent2():
         return self.mean_layer(h), self.logvar_layer(h)
 
 
+class AvgLatent3():
+    def __init__(self, d_model, latent_dim):
+        self.key = Dense(latent_dim, input_shape=(d_model,), activation='linear')
+        self.queries = TimeDistributed(Dense(latent_dim, input_shape=(d_model,), activation='linear'))
+        self.values = TimeDistributed(Dense(latent_dim, input_shape=(d_model,), activation='linear'))
+        self.after_avg = Dense(latent_dim, input_shape=(latent_dim,), activation='relu')
+        self.mean_layer = Dense(latent_dim, input_shape=(latent_dim,), name='mean_layer')
+        self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer')
+
+    def __call__(self, encoder_output):
+        # encoder output should be [batch size, length, d_model]
+        h = encoder_output
+        k_val = Lambda(lambda x: K.expand_dims(x[:,0,:],axis=1))(h)
+        key = self.key(k_val)
+        query = self.queries(h)
+        value = self.values(h)
+        a_vals = Dot(axes=2)([key, query])  # [batch_size, length, 1]
+        a_vals = Lambda(lambda x: K.squeeze(x, axis=1))(a_vals)
+        a_vals = Softmax(axis=1)(a_vals)
+        h = Dot(axes=1)([a_vals, value])  # [batch_size, 1, latent_dim]
+        h = self.after_avg(h)
+        return self.mean_layer(h), self.logvar_layer(h)
+
+
 class Vec2Variational():
     '''
     Simply yields a mean and variance using a linear transformation
@@ -848,8 +872,10 @@ class InterimDecoder4():
 
         # Calculate 'decoder_width' means/variances from output
         dim1 = int(2 ** np.ceil(np.log2(self.latent_dim)))
-        self.mean_layer = Dense(self.latent_dim, input_shape=(dim1 * d_model,), activation='relu', name='ID2_mean_layer')
-        self.logvar_layer = Dense(self.latent_dim, input_shape=(dim1 * d_model,), activation='relu',  name='ID2_logvar_layer')
+        self.mean_layer = Dense(self.latent_dim, input_shape=(dim1 * d_model,), activation='relu',
+                                name='ID2_mean_layer')
+        self.logvar_layer = Dense(self.latent_dim, input_shape=(dim1 * d_model,), activation='relu',
+                                  name='ID2_logvar_layer')
         self.mean_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_mean_layer2')
         self.logvar_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_logvar_layer2')
 
@@ -953,7 +979,6 @@ class InterimDecoder4():
         # Outside the loop just to make Keras happy
         return self.compute_next_z(z, src_seq, enc_output)
 
-
     def cond(self, z_so_far, src_seq, enc_output):
         # Return true while mean length is less than latent dim
         return tf.less(K.shape(z_so_far)[1], self.ldim)
@@ -1017,7 +1042,7 @@ class FalseEmbeddings():
         :param d_emb: dimensionality of false embeddings
         '''
 
-        latent_len = int(np.ceil(d_latent / d_emb) * d_emb)
+        latent_len = int(np.ceil(d_latent / d_emb))
         self.init_layer = Dense(d_emb * latent_len, input_shape=(d_latent,))
 
         # self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,)))
@@ -1198,6 +1223,7 @@ add_layer = Lambda(lambda x: x[0] + x[1], output_shape=lambda x: x[0])
 
 latent_dict = {"average1": AvgLatent,
                "average2": AvgLatent2,
+               "average3": AvgLatent3,
                "sum1": SumLatent,
                "sum2": SumLatent2,
                "ar1": InterimDecoder,

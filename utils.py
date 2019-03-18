@@ -384,14 +384,14 @@ class AttnParams:
             "heads": 4,
             "layers": 1,
             "dropout": 0.1,
-            "bottleneck": "ar_log",
+            "bottleneck": "average2",
             "ID_d_model": None,
             "ID_d_inner_hid": None,
             "ID_heads": None,
-            "ID_d_k": None,
+            "ID_d_k": 64,
             "ID_d_v": None,
-            "ID_layers": 5,
-            "ID_width": 4,
+            "ID_layers": 3,
+            "ID_width": None,
             "pp_layers": 3,
             "num_params": None
         }
@@ -429,9 +429,8 @@ class AttnParams:
     def dump(self):
         # get max length
         m_len = max([len(key) for key in self._params])
-
         for key in self._params:
-            if "ID" in key and self._params["bottleneck"] != "interim_decoder":
+            if "ID" in key and "ar" not in self._params["bottleneck"]:
                 pass
             else:
                 print("\t{}  {}".format(key.ljust(m_len), self._params[key]))
@@ -467,6 +466,17 @@ class AttnParams:
     @property
     def params(self):
         return self._params
+
+
+class DefaultDecoderParams(AttnParams):
+    def __init__(self):
+        super().__init__()
+        self["layers"] = 3
+        self["d_model"] = 64
+        self["d_inner_hid"] = 512
+        self["d_k"] = 8
+        self["d_v"] = 8
+        self["heads"] = 8
 
 
 class TokenList:

@@ -12,6 +12,7 @@ from keras.utils.training_utils import multi_gpu_model
 
 import molecules.transformer as tr
 from molecules.transformer import debugPrint
+from utils import DefaultDecoderParams
 
 
 class MoleculeVAE():
@@ -99,7 +100,7 @@ class TriTransformer:
                                weights=[tr.GetPosEncodingMatrix(params["len_limit"], params["d_model"])])
         self.word_emb = tr.Embedding(self.o_tokens.num(), self.p["d_model"])
         self.decode = None
-        if self.p["bottleneck"] == "conv" or self.p["bottleneck"] == "gru":
+        if self.p["bottleneck"] == "conv" or "gru" in self.p["bottleneck"]:
             self.encoder = None
         else:
             self.encoder = TransformerEncoder(params=params, tokens=i_tokens,
@@ -123,31 +124,43 @@ class TriTransformer:
                 return z_mean_ + K.exp(z_logvar_ / 2) * epsilon
 
         self.sampler = Lambda(sampling)
-        self.false_embedder = tr.FalseEmbeddings(d_emb=params["d_model"], d_latent=params["latent_dim"])
-        self.decoder = tr.DecoderFromLatent(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"], self.p["d_k"],
-                                            self.p["d_v"],
-                                            self.p["layers"], self.p["dropout"],
-                                            word_emb=self.word_emb, pos_emb=pos_emb)
+        use_default_decoder = True
+        if use_default_decoder:
+            self.p = DefaultDecoderParams()
+            dec_pos_emb = tr.Embedding(self.p["len_limit"], self.p["d_model"], trainable=False,
+                                       weights=[tr.GetPosEncodingMatrix(params["len_limit"], self.p["d_model"])])
+            dec_word_emb = tr.Embedding(self.o_tokens.num(), self.p["d_model"])
+        else:
+            dec_word_emb = self.word_emb
+            dec_pos_emb = pos_emb
 
+        self.false_embedder = tr.FalseEmbeddings(d_emb=self.p["d_model"], d_latent=self.p["latent_dim"])
+
+        self.decoder = tr.DecoderFromLatent(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"], self.p["d_k"],
+                                            self.p["d_v"], self.p["layers"], self.p["dropout"],
+                                            word_emb=dec_word_emb, pos_emb=dec_pos_emb)
+        self.p = params
         self.target_layer = TimeDistributed(Dense(self.o_tokens.num(), use_bias=False))
 
         self.metrics = {}
 
-    def _buildGRUEncoder(self, x):
+    def _buildGRUEncoder(self, x, no_attn=False):
         h = self.word_emb(x)
         # For now, avoid having to introduce new commandline parameters
         for _ in range(self.p["ID_layers"]):
             h = GRU(self.p["ID_d_k"], return_sequences=True)(h)
+        if no_attn:
+            h = h[:, -1, :]
+        else:
+            values = TimeDistributed(Dense(self.p["latent_dim"]))(h)
+            queries = TimeDistributed(Dense(self.p["latent_dim"]))(h)
+            keys = TimeDistributed(Dense(self.p["latent_dim"]))(h)
 
-        values = TimeDistributed(Dense(self.p["latent_dim"]))(h)
-        queries = TimeDistributed(Dense(self.p["latent_dim"]))(h)
-        keys = TimeDistributed(Dense(self.p["latent_dim"]))(h)
+            attn_vals = Dot(axes=2)([keys, queries])
+            attn_vals = Lambda(lambda x: K.sum(x, axis=2, keepdims=True))(attn_vals)
 
-        attn_vals = Dot(axes=2)([keys, queries])
-        attn_vals = Lambda(lambda x: K.sum(x, axis=2, keepdims=True))(attn_vals)
-
-        h = Dot(axes=1)([attn_vals, values])
-        h = Lambda(lambda x: K.squeeze(x, axis=1))(h)
+            h = Dot(axes=1)([attn_vals, values])
+            h = Lambda(lambda x: K.squeeze(x, axis=1))(h)
         z_mean = Dense(self.p["latent_dim"], name='z_mean', activation='linear')(h)
         z_log_var = Dense(self.p["latent_dim"], name='z_log_var', activation='linear')(h)
         return z_mean, z_log_var
@@ -155,7 +168,6 @@ class TriTransformer:
     def _buildConvEncoder(self, x):
         h = Convolution1D(9, 9, activation='relu')(x)
         h = Convolution1D(9, 9, activation='relu')(h)
-        h = Convolution1D(10, 11, activation='relu')(h)
         h = Convolution1D(10, 11, activation='relu')(h)
         h = Flatten(name='flatten_1')(h)
         h = Dense(435, activation='relu')(h)
@@ -176,9 +188,9 @@ class TriTransformer:
 
         if self.encoder is None:
             enc_attn = None
-            if self.p["bottleneck"] == "gru":
+            if "gru" in self.p["bottleneck"]:
                 src_seq = Input(shape=(None,), dtype='int32', name='src_seq')
-                z_mean, z_logvar = self._buildGRUEncoder(src_seq)
+                z_mean, z_logvar = self._buildGRUEncoder(src_seq, no_attn=("na" in self.p["bottleneck"]))
             else:
                 src_seq = Input(shape=(self.p["len_limit"], self.i_tokens.num()), name='src_seq')
                 z_mean, z_logvar = self._buildConvEncoder(src_seq)
@@ -528,8 +540,7 @@ class TransformerEncoder():
                                                                           latent_dim=params["latent_dim"],
                                                                           pos_emb=latent_pos_emb,
                                                                           false_emb=None)
-        elif params["bottleneck"] == "grut":
-            print("Itsa gru!")
+        elif params["bottleneck"] == "trans_gru":
             self.encoder_to_latent = GRU(params["latent_dim"], return_sequences=False)
         elif params["bottleneck"] == "none":
             self.encoder_to_latent = tr.Vec2Variational(params["d_model"], params["len_limit"])
@@ -544,7 +555,7 @@ class TransformerEncoder():
             z_mean, z_logvar, z_s = self.encoder_to_latent(src_seq, enc_output)
         elif "ar" in self.p["bottleneck"]:
             z_mean, z_logvar = self.encoder_to_latent(src_seq, enc_output)
-        elif self.p["bottleneck"] == "transgru":
+        elif self.p["bottleneck"] == "trans_gru":
             h = self.encoder_to_latent(enc_output)
             z_mean = Dense(self.p["latent_dim"])(h)
             z_logvar = Dense(self.p["latent_dim"])(h)
