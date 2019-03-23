@@ -31,6 +31,8 @@ def supress_stderr():
     """
     stdchannel = sys.stderr
     dest_filename = os.devnull
+    dest_file = None
+    oldstdchannel = None
     try:
         oldstdchannel = os.dup(stdchannel.fileno())
         dest_file = open(dest_filename, 'w')
@@ -115,7 +117,7 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
     # define decoding function
 
     if beam_width == 1:
-        output = lambda x, y: SeqInfer.decode_sequence_fast(input_seq=seq, moments=[x, y])
+        output = lambda x, y: [SeqInfer.decode_sequence_fast(input_seq=seq, moments=[x, y])]
     else:
         output = lambda x, y: np.array(SeqInfer.beam_search(input_seq=seq, topk=beam_width, moments=[x, y]))
 
@@ -138,11 +140,11 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
                 if s.ndim > 1: s = s[:, 0]
 
                 for mol in s:
+                    print("\tGENERATED", mol)
                     # keep if unique
                     if mol not in output_molecules:
                         output_molecules.append(mol)
                         mol = Chem.MolFromSmiles(mol)
-                        # mol is None if it wasn't a valid SMILES string
                         if mol:
                             try:
                                 gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
@@ -186,7 +188,7 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1):
     # define decoding function
 
     if beam_width == 1:
-        output = lambda x: SeqInfer.decode_sequence_fast(input_seq=None, moments=[x])
+        output = lambda x: [SeqInfer.decode_sequence_fast(input_seq=x)]
     else:
         output = lambda x: np.array(SeqInfer.beam_search(input_seq=None, topk=beam_width, moments=[x]))
 
@@ -203,20 +205,25 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1):
         for bar_i in range(nseeds):
             z_i = np.random.randn(latent_dim)
             s = output(z_i)
+            
             if s.ndim > 1: s = s[:, 0]
-
+            print("Seed", bar_i,":", z_i, "\nGenerated",len(s),"molecules")
             for mol in s:
-                # keep if unique
+                print("\tGENERATED", mol)
+                    # keep if unique
                 if mol not in output_molecules:
+                    print("\t\tNew!")
                     output_molecules.append(mol)
                     mol = Chem.MolFromSmiles(mol)
-                    # mol is None if it wasn't a valid SMILES string
+                        # mol is None if it wasn't a valid SMILES str
                     if mol:
                         try:
                             gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
                         except:
-                            print("Could not calculate properties for {}".format(Chem.MolToSmiles(mol)))
-            bar.update(bar_i)
+                            print("Could not calculate properties for {}".format(Chem.MolToSmiles(mol)))                   # bar.update(bar_i)
+                    else:
+                        print("\t\t\tNot valid")
+                    bar.update(bar_i) 
 
     print("Generated {} unique sequences, of which {} were valid.".format(len(output_molecules), len(gen_props)))
 
@@ -276,7 +283,6 @@ def main():
     print("Exploring property distributions of chemicals from {} decoding(s) of {} random seed(s):".format(
         args.n_decodings,
         args.n_seeds))
-
     with supress_stderr():
         if args.prior_sample:
             gen_props, frac_valid = rand_mols(args.n_seeds, model_params["latent_dim"], SeqInfer, args.beam_width)

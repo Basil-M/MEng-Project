@@ -7,6 +7,7 @@ from hyperas import optim
 from hyperas.distributions import quniform
 from hyperopt import Trials, STATUS_OK, tpe
 from model_analysis import property_distributions as PD
+from model_analysis import supress_stderr
 from molecules.model import SequenceInference
 import utils
 from train import trainTransformer
@@ -60,18 +61,16 @@ def create_model(x_train, y_train, x_test, y_test):
     params = utils.AttnParams()
     params["latent_dim"] = 60
     params["bottleneck"] = "average1"
-    params["kl_pretrain_epochs"] = 0
-    params["kl_anneal_epochs"] = 0
-    params["ID_width"] = 4
+    params["kl_pretrain_epochs"] = 1 
+    params["kl_anneal_epochs"] = 1
     params["batch_size"] = 50
-    params["epochs"] = 1
+    params["epochs"] = 4
 
     # model params to change
-    d_model = {{quniform(60, 150, 2)}}
+    d_model = {{quniform(60, 150, 4)}}
     d_inner_hid = {{quniform(128, 2048, 4)}}
-    d_k = {{quniform(4, 36, 2)}}
-    layers = {{quniform(1, 4, 1)}}
-    # warmup = {{quniform(6000, 20000, 100)}}
+    d_k = {{quniform(4, 30, 2)}}
+    layers = {{quniform(1, 5, 1)}}
 
     params["d_model"] = int(d_model)
     params["d_inner_hid"] = int(d_inner_hid)
@@ -92,7 +91,7 @@ def create_model(x_train, y_train, x_test, y_test):
     validation_acc = np.amax(result.history['val_acc'])
     SeqInfer = SequenceInference(model, tokens)
     gen_props, data_props, frac_valid = PD(x_train[0], x_train[-1],
-                                           num_seeds=300,
+                                           num_seeds=200,
                                            num_decodings=3,
                                            SeqInfer=SeqInfer,
                                            beam_width=5)
@@ -104,10 +103,12 @@ def create_model(x_train, y_train, x_test, y_test):
 
 
 if __name__ == '__main__':
+    np.random.seed(170)
+#    with supress_stderr():
     best_run, best_model = optim.minimize(model=create_model,
                                           data=data,
                                           algo=tpe.suggest,
-                                          max_evals=5,
+                                          max_evals=50,
                                           trials=Trials())
     X_train, Y_train, X_test, Y_test = data()
     print("Best performing model chosen hyper-parameters:")
