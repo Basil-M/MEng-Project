@@ -5,7 +5,7 @@ from keras import objectives
 from keras.layers import Input, Lambda, Dot
 from keras.layers.convolutional import Convolution1D
 from keras.layers.core import Dense, Flatten, RepeatVector
-from keras.layers.recurrent import GRU
+from keras.layers.recurrent import GRU, LSTM
 from keras.layers.wrappers import TimeDistributed
 from keras.models import Model
 from keras.utils.training_utils import multi_gpu_model
@@ -96,16 +96,20 @@ class TriTransformer:
         self.p = params
         self.o_tokens = i_tokens  # Autoencoder
 
+        # Positional and word embeddings
         pos_emb = tr.Embedding(params["len_limit"], params["d_model"], trainable=False,
                                weights=[tr.GetPosEncodingMatrix(params["len_limit"], params["d_model"])])
         self.word_emb = tr.Embedding(self.o_tokens.num(), self.p["d_model"])
+
         self.decode = None
         if self.p["bottleneck"] == "conv" or "gru" in self.p["bottleneck"]:
+            # Model will be built in the 'build_models' code
             self.encoder = None
         else:
             self.encoder = TransformerEncoder(params=params, tokens=i_tokens,
                                               pos_emb=pos_emb, word_emb=self.word_emb)
-        # self.encoder =
+
+        # KL Loss variable, weights the amount of variational loss, used by VAE annealing callback
         self.kl_loss_var = K.variable(0.0, dtype=np.float, name='kl_loss_weight') if self.p["stddev"] else None
 
         # Sample from latent space
@@ -124,6 +128,11 @@ class TriTransformer:
                 return z_mean_ + K.exp(z_logvar_ / 2) * epsilon
 
         self.sampler = Lambda(sampling)
+
+        # Use a default decoder configuration
+        # To standardise across different tests
+        # We are trying to assess the quality of the latent space
+        # TODO(Basil): Make this a command line parameter
         use_default_decoder = True
         if use_default_decoder:
             self.p = DefaultDecoderParams()
@@ -148,7 +157,7 @@ class TriTransformer:
         h = self.word_emb(x)
         # For now, avoid having to introduce new commandline parameters
         for _ in range(self.p["ID_layers"]):
-            h = GRU(self.p["ID_d_k"], return_sequences=True)(h)
+            h = LSTM(self.p["ID_d_model"], return_sequences=True)(h)
         if no_attn:
             h = h[:, -1, :]
         else:
@@ -166,11 +175,12 @@ class TriTransformer:
         return z_mean, z_log_var
 
     def _buildConvEncoder(self, x):
-        h = Convolution1D(9, 9, activation='relu')(x)
-        h = Convolution1D(9, 9, activation='relu')(h)
-        h = Convolution1D(10, 11, activation='relu')(h)
+        h = x
+        for i in range(self.p["ID_layers"]):
+            d = self.p["ID_d_k"] + i
+            h = Convolution1D(d, d, activation='relu')(h)
         h = Flatten(name='flatten_1')(h)
-        h = Dense(435, activation='relu')(h)
+        h = Dense(self.p["ID_d_model"], activation='relu')(h)
         z_mean = Dense(self.p["latent_dim"], name='z_mean', activation='linear')(h)
         z_log_var = Dense(self.p["latent_dim"], name='z_log_var', activation='linear')(h)
         return z_mean, z_log_var
@@ -201,6 +211,7 @@ class TriTransformer:
             z_mean, z_logvar, z_sampled, enc_attn = self.encoder(src_seq, src_pos)
 
         # Sample
+        # May not need to as some models (E.g. ar1) return a sampled vector
         if z_sampled is None:
             z_sampled = self.sampler([z_mean, z_logvar])
 

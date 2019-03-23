@@ -247,7 +247,6 @@ def main():
         d_type = "TRANSFORMER"
     data_train, data_test, props_train, props_test, tokens = load_dataset(d_file, d_type, False)
     props_train, props_test, prop_labels = load_properties(d_file)
-    print("prop_labels", prop_labels)
 
     if model_params["model_arch"] == "TRANSFORMER":
         # Model is an attention based model
