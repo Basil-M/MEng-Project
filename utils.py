@@ -364,9 +364,8 @@ class AttnParams:
             "len_limit": 120,
             "num_props": 4,
             "current_epoch": 1,  # Training params
-            "epochs": 5,
-            "ae_trained": False,
-            "batch_size": 20,
+            "epochs": 20,
+            "batch_size": 40,
             "kl_pretrain_epochs": 1,
             "kl_anneal_epochs": 1,
             "kl_max_weight": 1,
@@ -374,7 +373,6 @@ class AttnParams:
             "WAE_s": 2,
             "stddev": 1,
             "pp_weight": 1.25,
-            "pp_epochs": 15,
             "model_arch": "TRANSFORMER",  # Model params
             "latent_dim": 32,
             "d_model": 24,
@@ -385,6 +383,7 @@ class AttnParams:
             "layers": 1,
             "dropout": 0.1,
             "bottleneck": "average2",
+            "pp_layers": 3,             # Number of property predictor layers
             "ID_d_model": None,
             "ID_d_inner_hid": None,
             "ID_heads": None,
@@ -392,7 +391,6 @@ class AttnParams:
             "ID_d_v": None,
             "ID_layers": 3,
             "ID_width": None,
-            "pp_layers": 3,
             "num_params": None
         }
 

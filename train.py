@@ -193,7 +193,7 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
     # Set up callbacks
     # Learning rate scheduler
 
-    model_trained = False
+    model_trained = params["current_epoch"] > params["epochs"]
     n_pretrain = params["kl_pretrain_epochs"] + params["kl_anneal_epochs"]
     while not model_trained:
         pretraining_done = params["current_epoch"] > n_pretrain
@@ -307,45 +307,17 @@ def main():
             params.save(param_filename)
         else:
             loaded_params.load(param_filename)
-            print("Found model also named {} with params:".format(args.model))
+            print("Found model also named {} trained for {} epochs with params:".format(args.model,
+                                                                                        loaded_params["current_epoch"]))
             loaded_params.dump()
-
-            # Found pre-existing training with current_epoch
-            current_epoch = loaded_params["current_epoch"]
-
             # Allow for increasing number of epochs of pre-trained model
             if params["epochs"] > loaded_params["epochs"]:
                 print(
-                    "Number of epochs increased to {} from {} - autoencoder may require further training. If so, property predictor may be trained from scratch.".format(
+                    "Number of epochs increased to {} from {}. Autoencoder will be trained more.".format(
                         params["epochs"], loaded_params["epochs"]))
-                loaded_params["ae_trained"] = False
                 loaded_params["epochs"] = params["epochs"]
 
-            elif params["pp_epochs"] > loaded_params["pp_epochs"]:
-                print(
-                    "Number of property predictor epochs increased to {} from {}, but autoencoder is fully trained. Property predictor will continue training.".format(
-                        params["pp_epochs"], loaded_params["pp_epochs"]))
-                loaded_params["pp_epochs"] = params["pp_epochs"]
-
-            if loaded_params["ae_trained"]:
-                print(
-                    "Found model with fully trained auto-encoder.\nProperty predictor has been trained for {} epochs - continuing from epoch {}".format(
-                        current_epoch - 1,
-                        current_epoch))
-            elif current_epoch != 1:
-                print(
-                    "Found model trained for {} epochs - continuing from epoch {}".format(current_epoch - 1,
-                                                                                          current_epoch))
-
-                params = loaded_params
-
-        # Train model
-        # if params["pp_weight"] == 0 or params["pp_weight"] is None:
-        #     data_train = data_train
-        #     data_test = data_test
-        # else:
-        #     data_train = [data_train, props_train]
-        #     data_test = [data_test, props_test]
+            params = loaded_params
 
         model, results = trainTransformer(params=params, data_file=args.data,
                                           # data_train=data_train, data_test=data_test, tokens=tokens,

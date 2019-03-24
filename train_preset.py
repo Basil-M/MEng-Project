@@ -200,37 +200,16 @@ def main():
         params.save(param_filename)
     else:
         loaded_params.load(param_filename)
-        print("Found model also named {} with params:".format(model_name))
+        print("Found model also named {} trained for {} epochs with params:".format(model_name, loaded_params["current_epoch"]))
         loaded_params.dump()
-
-        # Found pre-existing training with current_epoch
-        current_epoch = loaded_params["current_epoch"]
-
         # Allow for increasing number of epochs of pre-trained model
         if params["epochs"] > loaded_params["epochs"]:
             print(
-                "Number of epochs increased to {} from {} - autoencoder may require further training. If so, property predictor may be trained from scratch.".format(
+                "Number of epochs increased to {} from {}. Autoencoder will be trained more.".format(
                     params["epochs"], loaded_params["epochs"]))
-            loaded_params["ae_trained"] = False
             loaded_params["epochs"] = params["epochs"]
 
-        elif params["pp_epochs"] > loaded_params["pp_epochs"]:
-            print(
-                "Number of property predictor epochs increased to {} from {}, but autoencoder is fully trained. Property predictor will continue training.".format(
-                    params["pp_epochs"], loaded_params["pp_epochs"]))
-            loaded_params["pp_epochs"] = params["pp_epochs"]
-
-        if loaded_params["ae_trained"]:
-            print(
-                "Found model with fully trained auto-encoder.\nProperty predictor has been trained for {} epochs - continuing from epoch {}".format(
-                    current_epoch - 1,
-                    current_epoch))
-        elif current_epoch != 1:
-            print(
-                "Found model trained for {} epochs - continuing from epoch {}".format(current_epoch - 1,
-                                                                                      current_epoch))
-
-            params = loaded_params
+        params = loaded_params
 
     model, results = trainTransformer(params=params, data_file=args.data,
                                       model_dir=model_dir)
@@ -238,7 +217,7 @@ def main():
     data_train, data_test, _, _, tokens = utils.load_dataset(args.data, "TRANSFORMER",
                                                              params["pp_weight"])
     props_train, props_test, prop_labels = utils.load_properties(args.data)
-    SeqInfer = SequenceInference(model, model.tokens)
+    SeqInfer = SequenceInference(model, tokens)
     with supress_stderr():
         gen_props, data_props, frac_valid = property_distributions(data_test[0], data_test[-1],
                                                                    num_seeds=300,
