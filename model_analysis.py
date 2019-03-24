@@ -1,6 +1,7 @@
 import argparse
 ## LOGGING
 import logging
+import pickle
 from os.path import exists
 
 import h5py
@@ -103,7 +104,7 @@ def latent_distributions(latents_file, plot_kd=False):
 
 
 def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqInfer: SequenceInference, beam_width=1,
-                           latents_file=None):
+                           data_file=None, latents_file=None):
     pst = props_test
     # Get num_seeds random points from test data
     indices = np.array(range(0, len(data_test)))
@@ -112,10 +113,18 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
     data_test = np.array(data_test)  # allow for fancy indexing
     data_test = list(data_test[indices])
     props_test = props_test[indices, :]
+    successful_seeds = 0
 
     output_molecules = []
-    # define decoding function
+    num_novel = -1
+    if data_file:
+        _, ext = os.path.splitext('/path/to/somefile.ext')
+        if ext == ".h5":
+            data_file.replace(".h5", ".pkl")
+        canon_structs = pickle.load(data_file)
+        num_novel = 0
 
+    # define decoding function
     if beam_width == 1:
         output = lambda x, y: [SeqInfer.decode_sequence_fast(input_seq=seq, moments=[x, y])]
     else:
@@ -139,17 +148,25 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
                 s = output(mu, logvar)
                 if s.ndim > 1: s = s[:, 0]
 
+                success = False  # Track whether we produced a valid molecule from this seed
+
                 for mol in s:
-                    print("\tGENERATED", mol)
+                    rd_mol = Chem.MolFromSmiles(mol)
+                    if rd_mol:
+                        success = True
+
                     # keep if unique
                     if mol not in output_molecules:
                         output_molecules.append(mol)
-                        mol = Chem.MolFromSmiles(mol)
-                        if mol:
+                        if rd_mol:
                             try:
                                 gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
+                                if num_novel != -1:
+                                    if not Chem.MolToSmiles(mol) in canon_structs:
+                                        num_novel += 1
                             except:
                                 print("Could not calculate properties for {}".format(Chem.MolToSmiles(mol)))
+                if success: successful_seeds += 1
                 bar_i += 1
                 bar.update(bar_i)
 
@@ -172,10 +189,19 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
                 plt.title(prop_labels[k])
                 plt.show()
 
-    return np.array(gen_props), props_test, len(gen_props) / len(output_molecules)
+    output = {"gen_props": np.array(gen_props),
+              "output_mols": output_molecules,
+              "num_valid": len(gen_props),
+              "num_mols": len(output_molecules),
+              "success_frac": successful_seeds / num_seeds,
+              "yield": len(output_molecules) / num_seeds}
+
+    if data_file:
+        output["num_novel"] = num_novel
+    return output
 
 
-def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1):
+def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1, data_file=None):
     '''
 
     :param nseeds:
@@ -192,6 +218,15 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1):
     else:
         output = lambda x: np.array(SeqInfer.beam_search(input_seq=None, topk=beam_width, moments=[x]))
 
+    num_novel = -1
+    if data_file:
+        _, ext = os.path.splitext('/path/to/somefile.ext')
+        if ext == ".h5":
+            data_file.replace(".h5", ".pkl")
+        canon_structs = pickle.load(data_file)
+        num_novel = 0
+
+    successful_seeds = 0  # Track number of latent space points which give a valid decoding
     # progressbar
     # decode molecules multiple times
     gen_props = []
@@ -205,29 +240,40 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1):
         for bar_i in range(nseeds):
             z_i = np.random.randn(latent_dim)
             s = output(z_i)
-            
+
             if s.ndim > 1: s = s[:, 0]
-            print("Seed", bar_i,":", z_i, "\nGenerated",len(s),"molecules")
+            success = False
             for mol in s:
-                print("\tGENERATED", mol)
-                    # keep if unique
+                rd_mol = Chem.MolFromSmiles(mol)
+                if rd_mol:
+                    success = True
+
+                # keep if unique
                 if mol not in output_molecules:
-                    print("\t\tNew!")
                     output_molecules.append(mol)
-                    mol = Chem.MolFromSmiles(mol)
-                        # mol is None if it wasn't a valid SMILES str
-                    if mol:
+                    # mol is None if it wasn't a valid SMILES str
+                    if rd_mol:
                         try:
                             gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
                         except:
-                            print("Could not calculate properties for {}".format(Chem.MolToSmiles(mol)))                   # bar.update(bar_i)
+                            print("Could not calculate properties for {}".format(
+                                Chem.MolToSmiles(mol)))  # bar.update(bar_i)
                     else:
                         print("\t\t\tNot valid")
-                    bar.update(bar_i) 
+            if success: successful_seeds += 1
+            bar.update(bar_i)
 
     print("Generated {} unique sequences, of which {} were valid.".format(len(output_molecules), len(gen_props)))
+    output = {"gen_props": np.array(gen_props),
+              "output_mols": output_molecules,
+              "num_mols": len(output_molecules),
+              "num_valid": len(gen_props),
+              "success_frac": successful_seeds / nseeds,
+              "yield": len(output_molecules) / nseeds}
+    if data_file:
+        output["num_novel"] = num_novel
 
-    return np.array(gen_props), len(gen_props) / len(output_molecules)
+    return output
 
 
 def main():
@@ -284,15 +330,20 @@ def main():
         args.n_seeds))
     with supress_stderr():
         if args.prior_sample:
-            gen_props, frac_valid = rand_mols(args.n_seeds, model_params["latent_dim"], SeqInfer, args.beam_width)
+            output = rand_mols(args.n_seeds, model_params["latent_dim"], SeqInfer, args.beam_width)
         else:
-            gen_props, data_props, frac_valid = property_distributions(data_test, props_test,
-                                                                       num_seeds=args.n_seeds,
-                                                                       num_decodings=args.n_decodings,
-                                                                       SeqInfer=SeqInfer,
-                                                                       beam_width=args.beam_width)  # ,
+            output = property_distributions(data_test, props_test,
+                                            num_seeds=args.n_seeds,
+                                            num_decodings=args.n_decodings,
+                                            SeqInfer=SeqInfer,
+                                            beam_width=args.beam_width,
+                                            data_file=None)  # ,
 
-    print("\tValid mols:\t {:.2f}".format(frac_valid))
+    print("Generated {} molecules, of which {} were valid.".format(output["num_mols"], output["num_valid"]))
+    print("\tValid mols:\t {:.2f}".format(output["num_valid"] / output["num_mols"]))
+    if "num_novel" in output: print("\tNovel mols:\t{:.2f}".format(output["num_novel"]))
+    print("\tSuccess frac:\t{:.2f}".format(output["success_frac"]))
+    print("\tYield:\t{:.2f}".format(output["yield"]))
     for (i, key) in enumerate(rdkit_funcs):
         if key in prop_labels:
             k = prop_labels.index(key)
@@ -301,7 +352,7 @@ def main():
             dat = props_test[:, k]
             print("\t\tTest distribution:\t {:.2f} ± {:.2f}".format(np.mean(dat), np.std(dat)))
 
-            gen_dat = gen_props[:, i]
+            gen_dat = output["gen_props"][:, i]
             print("\t\tGenerated distribution:\t {:.2f} ± {:.2f}".format(np.mean(gen_dat), np.std(gen_dat)))
 
 

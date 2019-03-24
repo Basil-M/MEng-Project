@@ -6,10 +6,10 @@ import numpy as np
 from hyperas import optim
 from hyperas.distributions import quniform
 from hyperopt import Trials, STATUS_OK, tpe
-from model_analysis import property_distributions as PD
-from model_analysis import supress_stderr
-from molecules.model import SequenceInference
+
 import utils
+from model_analysis import property_distributions as PD
+from molecules.model import SequenceInference
 from train import trainTransformer
 
 MODEL_ARCH = 'TRANSFORMER'
@@ -61,7 +61,7 @@ def create_model(x_train, y_train, x_test, y_test):
     params = utils.AttnParams()
     params["latent_dim"] = 60
     params["bottleneck"] = "average1"
-    params["kl_pretrain_epochs"] = 1 
+    params["kl_pretrain_epochs"] = 1
     params["kl_anneal_epochs"] = 1
     params["batch_size"] = 50
     params["epochs"] = 4
@@ -82,7 +82,7 @@ def create_model(x_train, y_train, x_test, y_test):
     params["heads"] = int(np.ceil(d_model / d_k))
     params.setIDparams()
     # GET TOKENS
-    _,_,_,_, tokens = utils.load_dataset('data/zinc_100k.h5', "TRANSFORMER", True)
+    _, _, _, _, tokens = utils.load_dataset('data/zinc_100k.h5', "TRANSFORMER", True)
 
     model, result = trainTransformer(params, tokens=tokens, data_train=x_train, data_test=x_test,
                                      callbacks=["var_anneal"])
@@ -90,11 +90,13 @@ def create_model(x_train, y_train, x_test, y_test):
     # get the highest validation accuracy of the training epochs
     validation_acc = np.amax(result.history['val_acc'])
     SeqInfer = SequenceInference(model, tokens)
-    gen_props, data_props, frac_valid = PD(x_train[0], x_train[-1],
-                                           num_seeds=200,
-                                           num_decodings=3,
-                                           SeqInfer=SeqInfer,
-                                           beam_width=5)
+    output = PD(x_train[0], x_train[-1],
+                num_seeds=200,
+                num_decodings=3,
+                SeqInfer=SeqInfer,
+                beam_width=5)
+
+    frac_valid = output["num_valid"]/output["num_mols"]
     print("With params:")
     params.dump()
     print("Validation acc:", validation_acc, "Fraction valid:", frac_valid)
@@ -104,7 +106,7 @@ def create_model(x_train, y_train, x_test, y_test):
 
 if __name__ == '__main__':
     np.random.seed(170)
-#    with supress_stderr():
+    #    with supress_stderr():
     best_run, best_model = optim.minimize(model=create_model,
                                           data=data,
                                           algo=tpe.suggest,

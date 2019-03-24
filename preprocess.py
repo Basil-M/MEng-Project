@@ -5,9 +5,10 @@ import h5py
 import numpy as np
 import pandas
 import progressbar
+import pickle
 from keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
-
+from os.path import exists
 from dataloader import SmilesToArray
 
 MAX_NUM_ROWS = 100000
@@ -53,7 +54,24 @@ def main():
     data = pandas.read_hdf(args.infile, 'table')
 
     colnames = list(data)
-    print(colnames)
+
+    # We save a list of canonicalised chemicals so that we can later check
+    # Whether generated molecules were in the dataset
+    txt_file = args.infile.replace(".h5", ".pkl")
+    if not exists(txt_file):
+        print("Generating text file of canonicalised chemicals")
+        print("May take a while...")
+        num_mols = len(data[args.smiles_column])
+        canon_structs = []
+        for idx in progressbar.progressbar(range(num_mols)):
+            mol = Chem.MolFromSmiles(''.join(data[args.smiles_column][idx]))
+            if mol:
+                canon_structs.append(Chem.MolToSmiles(mol))
+        with open(txt_file, mode='wb') as f:
+            pickle.dump(canon_structs, f, pickle.HIGHEST_PROTOCOL)
+    else:
+        canon_structs = pickle.load(txt_file)
+
     keys = data[args.smiles_column].map(len) < args.max_len + 1
     if args.length <= len(keys):
         data = data[keys].sample(n=args.length)
@@ -61,9 +79,6 @@ def main():
         data = data[keys]
 
     structures = data[args.smiles_column].map(lambda x: list(x.ljust(args.max_len)))
-
-    # Currently transformer model takes data in a different format
-    # TODO(Basil): Merge how Transformer/VAE handle data
 
     properties = []
     prop_names = []
@@ -78,6 +93,9 @@ def main():
             else:
                 print("\tProperty", prop, "not found in data file.")
                 print("\tAvailable columns are:", ','.join(colnames))
+
+
+
 
     del data
 
@@ -102,12 +120,7 @@ def main():
         for (idx, lst) in zip([train_idx, test_idx], [train_str, test_str]):
             # canonicalise
             for id in idx:
-                struct = ''.join(structures[id])
-                # print(struct)
-                mol = Chem.MolFromSmiles(struct)
-                if mol:
-                    struct = Chem.MolToSmiles(mol)
-                    lst.append(struct)
+                lst.append(canon_structs[id])
                 bar_i += 1
                 bar.update(bar_i)
     # Split testing and training data
@@ -123,14 +136,11 @@ def main():
 
     # Create data for GRU and pad to max length
     # bs x ml x 38
-
     onehot_train = to_categorical(transformer_train, tokens.num())
     onehot_test = to_categorical(transformer_test, tokens.num())
-    print("SHAPES BEFORE PADDING:", np.shape(onehot_train), np.shape(onehot_test))
     mlen = np.max([args.max_len, np.shape(onehot_train)[1], np.shape(onehot_test)[1]])
     onehot_train = np.pad(onehot_train, ((0, 0), (0, mlen - np.shape(onehot_train)[1]), (0, 0)), 'constant')
     onehot_test = np.pad(onehot_test, ((0, 0), (0, mlen - np.shape(onehot_test)[1]), (0, 0)), 'constant')
-    print("SHAPES AFTER PADDING:", np.shape(onehot_train), np.shape(onehot_test))
     h5f.create_dataset('onehot/train', data=onehot_train)
     h5f.create_dataset('onehot/test', data=onehot_test)
 

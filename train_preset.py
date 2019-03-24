@@ -200,7 +200,8 @@ def main():
         params.save(param_filename)
     else:
         loaded_params.load(param_filename)
-        print("Found model also named {} trained for {} epochs with params:".format(model_name, loaded_params["current_epoch"]))
+        print("Found model also named {} trained for {} epochs with params:".format(model_name,
+                                                                                    loaded_params["current_epoch"]))
         loaded_params.dump()
         # Allow for increasing number of epochs of pre-trained model
         if params["epochs"] > loaded_params["epochs"]:
@@ -219,27 +220,35 @@ def main():
     props_train, props_test, prop_labels = utils.load_properties(args.data)
     SeqInfer = SequenceInference(model, tokens)
     with supress_stderr():
-        gen_props, data_props, frac_valid = property_distributions(data_test[0], data_test[-1],
-                                                                   num_seeds=300,
-                                                                   num_decodings=3,
-                                                                   SeqInfer=SeqInfer,
-                                                                   beam_width=5)
+        seed_output = property_distributions(data_test[0], props_test,
+                                             num_seeds=300,
+                                             num_decodings=3,
+                                             SeqInfer=SeqInfer,
+                                             beam_width=5)
 
-        p_gen_props, p_frac_valid = rand_mols(args.n_seeds, args.latent_dim, SeqInfer, args.beam_width)
+        rand_output = rand_mols(400, params["latent_dim"], SeqInfer, 5)
 
-    print("\tValidation accuracy:\t {:.2f}".format(np.amax(results.history['val_acc'])))
-    for (mode, d) in zip(["Sample prior", "Seeded sampling"], [[gen_props, frac_valid], [p_gen_props, p_frac_valid]]):
-        print("For", mode, " frac_valid = {:.2f}".format(d[1]))
+    if results:
+        print("\tValidation accuracy:\t {:.2f}".format(np.amax(results.history['val_acc'])))
+        # TODO(Basil): Add getting results from CSV file...
+
+    for (mode, output) in zip(["SAMPLING PRIOR", "SAMPLING WITH SEEDS"], [seed_output, rand_output]):
+        print("BY", mode)
+        print("\tGenerated {} molecules, of which {} were valid.".format(output["num_mols"], output["num_valid"]))
+        print("\t\tValid mols:\t {:.2f}".format(output["num_valid"] / output["num_mols"]))
+        if "num_novel" in output: print("\tNovel mols:\t{:.2f}".format(output["num_novel"]))
+        print("\t\tSuccess frac:\t{:.2f}".format(output["success_frac"]))
+        print("\t\tYield:\t{:.2f}".format(output["yield"]))
         for (i, key) in enumerate(utils.rdkit_funcs):
             if key in prop_labels:
                 k = prop_labels.index(key)
 
-                print("\t{}:".format(key))
+                print("\t\t{}:".format(key))
                 dat = props_test[:, k]
-                print("\t\tTest distribution:\t {:.2f} ± {:.2f}".format(np.mean(dat), np.std(dat)))
+                print("\t\t\tTest distribution:\t {:.2f} ± {:.2f}".format(np.mean(dat), np.std(dat)))
 
-                gen_dat = d[1][:, i]
-                print("\t\tGenerated distribution:\t {:.2f} ± {:.2f}".format(np.mean(gen_dat), np.std(gen_dat)))
+                gen_dat = output["gen_props"][:, i]
+                print("\t\t\tGenerated distribution:\t {:.2f} ± {:.2f}".format(np.mean(gen_dat), np.std(gen_dat)))
 
 
 if __name__ == '__main__':

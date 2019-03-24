@@ -157,7 +157,7 @@ class TriTransformer:
         h = self.word_emb(x)
         # For now, avoid having to introduce new commandline parameters
         for _ in range(self.p["ID_layers"]):
-            h = LSTM(self.p["ID_d_model"], return_sequences=True)(h)
+            h = GRU(self.p["ID_d_model"], return_sequences=True)(h)
         if no_attn:
             h = h[:, -1, :]
         else:
