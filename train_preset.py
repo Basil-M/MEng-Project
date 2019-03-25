@@ -43,8 +43,8 @@ mnames = {"average1": "AVG1",
           "ar1": "AR1",
           "ar2": "AR2",
           "ar_log": "ARlog",
-          "gru": "GRUa",
-          "gru_na": "GRU",
+          "gru_attn": "GRUa",
+          "gru": "GRU",
           "conv": "CONV"}
 
 
@@ -63,9 +63,9 @@ def get_arguments():
                         help='Number of epochs to run during training.')
     parser.add_argument('--batch_size', type=int, metavar='N', default=40,
                         help='Number of samples to process per minibatch during training.')
-    parser.add_argument('--bottleneck', type=str, metavar='N', default="conv",
+    parser.add_argument('--bottleneck', type=str, metavar='N', default="gru_attn",
                         help='Choice of bottleneck')
-    parser.add_argument('--model_size', type=str, metavar='N', default="big",
+    parser.add_argument('--model_size', type=str, metavar='N', default="small",
                         help='Number of samples to process per minibatch during training.')
     parser.add_argument('--latent_dim', type=int, metavar='N', default=60,
                         help='Latent dimension')
@@ -98,7 +98,7 @@ def main():
     if args.model_size == "small":
         # small avg:    41609
         # small ar_log: 111409
-        # small GRU:    41272
+        # small GRU:    48688
         # small CONV:   47989
 
         params["d_model"] = 32
@@ -116,7 +116,7 @@ def main():
             params["ID_heads"] = 4
         elif "gru" in args.bottleneck:
             params["ID_layers"] = 3
-            params["ID_d_model"] = 38
+            params["ID_d_model"] = 48
         elif args.bottleneck == "conv":
             params["ID_layers"] = 2
             params["ID_d_k"] = 5

@@ -27,7 +27,7 @@ DATA = 'data/zinc_100k.h5'
 # DATA = 'C:\Code\MEng-Project\data\dummy2.txt'
 # DATA = 'data/dummy.txt'
 MODEL_ARCH = 'TRANSFORMER'
-MODEL_NAME = 'avgl2'
+MODEL_NAME = 'avg22'
 MODEL_DIR = 'models/'
 
 ## extra imports to set GPU options
@@ -122,8 +122,6 @@ def get_arguments():
                         help='Standard deviation of variational sampler')
 
     ### PROPERTY PREDICTOR PARAMETERS
-    parser.add_argument('--pp_epochs', type=int, metavar='N', default=default["pp_epochs"],
-                        help='Number of epochs to train property predictor')
 
     parser.add_argument('--pp_layers', type=int, metavar='N', default=default["pp_layers"],
                         help='Number of dense layers for property predictor')

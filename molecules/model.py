@@ -5,7 +5,7 @@ from keras import objectives
 from keras.layers import Input, Lambda, Dot
 from keras.layers.convolutional import Convolution1D
 from keras.layers.core import Dense, Flatten, RepeatVector
-from keras.layers.recurrent import GRU, LSTM
+from keras.layers.recurrent import GRU
 from keras.layers.wrappers import TimeDistributed
 from keras.models import Model
 from keras.utils.training_utils import multi_gpu_model
@@ -102,10 +102,20 @@ class TriTransformer:
         self.word_emb = tr.Embedding(self.o_tokens.num(), self.p["d_model"])
 
         self.decode = None
-        if self.p["bottleneck"] == "conv" or "gru" in self.p["bottleneck"]:
-            # Model will be built in the 'build_models' code
-            self.encoder = None
+        self.use_src_pos = False
+        if "gru" in self.p["bottleneck"]:
+            self.encoder = tr.GRUEncoder(layers=self.p["ID_layers"], d_gru=self.p["ID_d_model"],
+                                         latent_dim=self.p["latent_dim"],
+                                         attn=("attn" in self.p["bottleneck"]),
+                                         word_emb = self.word_emb)
+        elif self.p["bottleneck"] == "conv":
+            self.encoder = tr.ConvEncoder(layers=self.p["ID_layers"],
+                                          min_filt_size=self.p["ID_d_k"],
+                                          min_filt_num = self.p["ID_d_k"],
+                                          latent_dim=self.p["latent_dim"],
+                                          dense_dim =self.p["ID_d_model"])
         else:
+            self.use_src_pos = True
             self.encoder = TransformerEncoder(params=params, tokens=i_tokens,
                                               pos_emb=pos_emb, word_emb=self.word_emb)
 
@@ -133,7 +143,7 @@ class TriTransformer:
         # To standardise across different tests
         # We are trying to assess the quality of the latent space
         # TODO(Basil): Make this a command line parameter
-        use_default_decoder = True
+        use_default_decoder = False
         if use_default_decoder:
             self.p = DefaultDecoderParams()
             dec_pos_emb = tr.Embedding(self.p["len_limit"], self.p["d_model"], trainable=False,
@@ -153,38 +163,6 @@ class TriTransformer:
 
         self.metrics = {}
 
-    def _buildGRUEncoder(self, x, no_attn=False):
-        h = self.word_emb(x)
-        # For now, avoid having to introduce new commandline parameters
-        for _ in range(self.p["ID_layers"]):
-            h = GRU(self.p["ID_d_model"], return_sequences=True)(h)
-        if no_attn:
-            h = h[:, -1, :]
-        else:
-            values = TimeDistributed(Dense(self.p["latent_dim"]))(h)
-            queries = TimeDistributed(Dense(self.p["latent_dim"]))(h)
-            keys = TimeDistributed(Dense(self.p["latent_dim"]))(h)
-
-            attn_vals = Dot(axes=2)([keys, queries])
-            attn_vals = Lambda(lambda x: K.sum(x, axis=2, keepdims=True))(attn_vals)
-
-            h = Dot(axes=1)([attn_vals, values])
-            h = Lambda(lambda x: K.squeeze(x, axis=1))(h)
-        z_mean = Dense(self.p["latent_dim"], name='z_mean', activation='linear')(h)
-        z_log_var = Dense(self.p["latent_dim"], name='z_log_var', activation='linear')(h)
-        return z_mean, z_log_var
-
-    def _buildConvEncoder(self, x):
-        h = x
-        for i in range(self.p["ID_layers"]):
-            d = self.p["ID_d_k"] + i
-            h = Convolution1D(d, d, activation='relu')(h)
-        h = Flatten(name='flatten_1')(h)
-        h = Dense(self.p["ID_d_model"], activation='relu')(h)
-        z_mean = Dense(self.p["latent_dim"], name='z_mean', activation='linear')(h)
-        z_log_var = Dense(self.p["latent_dim"], name='z_log_var', activation='linear')(h)
-        return z_mean, z_log_var
-
     def get_pos_seq(self, x):
         mask = K.cast(K.not_equal(x, 0), 'int32')
         pos = K.cumsum(K.ones_like(x, 'int32'), 1)
@@ -196,19 +174,17 @@ class TriTransformer:
         tgt_true = Lambda(lambda x: x[:, 1:])(tgt_seq_in)
         tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
 
-        if self.encoder is None:
-            enc_attn = None
-            if "gru" in self.p["bottleneck"]:
-                src_seq = Input(shape=(None,), dtype='int32', name='src_seq')
-                z_mean, z_logvar = self._buildGRUEncoder(src_seq, no_attn=("na" in self.p["bottleneck"]))
-            else:
-                src_seq = Input(shape=(self.p["len_limit"], self.i_tokens.num()), name='src_seq')
-                z_mean, z_logvar = self._buildConvEncoder(src_seq)
-            z_sampled = None
+        if self.p["bottleneck"] == "conv":
+            src_seq = Input(shape=(self.p["len_limit"], self.i_tokens.num()), name='src_seq')
         else:
             src_seq = Input(shape=(None,), dtype='int32', name='src_seq')
+
+        if self.use_src_pos:
             src_pos = Lambda(self.get_pos_seq)(src_seq)
             z_mean, z_logvar, z_sampled, enc_attn = self.encoder(src_seq, src_pos)
+        else:
+            enc_attn = None
+            z_mean, z_logvar, z_sampled = self.encoder(src_seq)
 
         # Sample
         # May not need to as some models (E.g. ar1) return a sampled vector
