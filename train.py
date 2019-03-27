@@ -132,10 +132,10 @@ def get_arguments():
 def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_test=None, model_dir=None,
                      callbacks=None):
     if data_file:
-        data_train, data_test, props_train, props_test, tokens = load_dataset(data_file, "TRANSFORMER",
+        data_train, data_test, props_train, props_test, tokens = load_dataset(data_file, "cat",
                                                                               params["pp_weight"])
         if params["bottleneck"] == "conv":
-            data_train_onehot, data_test_onehot, _, _, _ = load_dataset(data_file, "conv", False)
+            data_train_onehot, data_test_onehot, _, _, _ = load_dataset(data_file, "onehot", False)
             data_train = [data_train_onehot, data_train]
             data_test = [data_test_onehot, data_test]
         else:
@@ -185,6 +185,7 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
     if params["current_epoch"] != 0 and model_dir is not None:
         if os.path.exists(model_dir + "model.h5"):
             model.autoencoder.load_weights(model_dir + "model.h5", by_name=True)
+
     # Store number of params
     params["num_params"] = int(np.sum([K.count_params(p) for p in set(model.encode.trainable_weights)]))
     print("NUMBER OF PARAMETERS:", params["num_params"])
@@ -235,7 +236,7 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
                                         initial_epoch=params["current_epoch"] - 1,
                                         validation_data=(data_test, None),
                                         callbacks=cb)
-        params["current_epoch"] += len(results.history['acc'])
+
         model_trained = params["current_epoch"] > params["epochs"]
 
     return model, results
@@ -260,7 +261,7 @@ def main():
     ## VARIATIONAL AUTOENCODER
     if args.model_arch == "VAE":
         from molecules.model import MoleculeVAE
-        data_train, data_test, tokens = load_dataset(args.data, "conv", params["pp_weight"])
+        data_train, data_test, tokens = load_dataset(args.data, "onehot", params["pp_weight"])
         if params["pp_weight"]:
             params["num_props"] = np.shape(data_test[1])[1]
             data_train_in = data_train[0]

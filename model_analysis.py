@@ -294,9 +294,9 @@ def main():
     # Get data
     d_file = model_params["data"]
     if model_params["bottleneck"] == "conv" or model_params["model_arch"] == "VAE":
-        d_type = "VAE"
+        d_type = "onehot"
     else:
-        d_type = "TRANSFORMER"
+        d_type = "cat"
     data_train, data_test, props_train, props_test, tokens = load_dataset(d_file, d_type, False)
     props_train, props_test, prop_labels = load_properties(d_file)
 

@@ -43,7 +43,6 @@ class epoch_track(Callback):
         self._filename = param_filename
         if csv_track:
             models_dir = dirname(dirname(param_filename))
-            print(models_dir)
             self.csv_filename = models_dir + "runs.csv"
             self.rownum, _ = params.dumpToCSV(self.csv_filename)
         else:
@@ -160,11 +159,10 @@ def decode_smiles_from_indexes(vec, charset):
     return "".join(map(lambda x: charset[x], vec)).strip()
 
 
-def load_dataset(filename, architecture="TRANSFORMER", props=False):
+def load_dataset(filename, data_format="cat", props=False):
     with h5py.File(filename, 'r') as h5f:
-        pref = "cat" if architecture == "TRANSFORMER" else "onehot"
-        data_train = h5f[pref + '/train'][:]
-        data_test = h5f[pref + '/test'][:]
+        data_train = h5f[data_format + '/train'][:]
+        data_test = h5f[data_format + '/test'][:]
         tokens = TokenList([s.decode('utf-8') for s in h5f['charset'][:]])
         if props:
             props_train = h5f['properties/train'][:]

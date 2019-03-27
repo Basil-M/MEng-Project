@@ -246,10 +246,12 @@ def main():
     model, results = trainTransformer(params=params, data_file=args.data,
                                       model_dir=model_dir)
 
-    data_train, data_test, _, _, tokens = utils.load_dataset(args.data, "TRANSFORMER",
+    data_train, data_test, _, _, tokens = utils.load_dataset(args.data, "onehot" if args.bottleneck == "conv" else "cat",
                                                              params["pp_weight"])
     props_train, props_test, prop_labels = utils.load_properties(args.data)
+
     SeqInfer = SequenceInference(model, tokens)
+
     with supress_stderr():
         seed_output = property_distributions(data_test[0], props_test,
                                              num_seeds=300,
