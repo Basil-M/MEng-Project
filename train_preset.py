@@ -43,7 +43,7 @@ mnames = {"average1": "AVG1",
           "ar1": "AR1",
           "ar2": "AR2",
           "ar_log": "ARlog",
-          "ar_s": "ARslim",
+          "ar_slim": "ARslim",
           "gru_attn": "GRUa",
           "gru": "GRU",
           "conv": "CONV"}
@@ -94,7 +94,7 @@ def main():
     params["batch_size"] = args.batch_size
     params["kl_pretrain_epochs"] = 2
     params["kl_anneal_epochs"] = 3
-    params["bottleneck"] = "ar_slim" #args.bottleneck
+    params["bottleneck"] = args.bottleneck
     params["stddev"] = 1
     params["model_arch"] = "TRANSFORMER"
     params["latent_dim"] = args.latent_dim
@@ -265,9 +265,9 @@ def main():
 
     for (mode, output) in zip(["SAMPLING PRIOR", "SAMPLING WITH SEEDS"], [seed_output, rand_output]):
         print("BY", mode)
-        print("\tGenerated {} molecules, of which {} were valid.".format(output["num_mols"], output["num_valid"]))
+        print("\tGenerated {} molecules, of which {} were valid and {} were novel.".format(output["num_mols"], output["num_valid"], output["num_novel"]))
         print("\t\tValid mols:\t {:.2f}".format(output["num_valid"] / output["num_mols"]))
-        if "num_novel" in output: print("\t\tNovel mols:\t{:.2f}".format(output["num_novel"]))
+        if "num_novel" in output: print("\t\tNovel mols:\t{:.2f}".format(output["num_novel"]/output["num_valid"]))
         print("\t\tSuccess frac:\t{:.2f}".format(output["success_frac"]))
         print("\t\tYield:\t{:.2f}".format(output["yield"]))
         for (i, key) in enumerate(utils.rdkit_funcs):

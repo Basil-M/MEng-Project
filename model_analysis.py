@@ -155,19 +155,16 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
                     rd_mol = Chem.MolFromSmiles(mol)
                     if rd_mol:
                         success = True
-                    if data_file:
-                        if mol not in canon_structs:
-                            num_novel+=1
                     # keep if unique
                     if mol not in output_molecules:
                         output_molecules.append(mol)
                         if rd_mol:
                             num_valid +=1
+                            if data_file:
+                                if not Chem.MolToSmiles(rd_mol) in canon_structs:
+                                    num_novel += 1
                             try:
                                 gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
-                                if num_novel != -1:
-                                    if not Chem.MolToSmiles(mol) in canon_structs:
-                                        num_novel += 1
                             except:
                                  pass
 #                                print("Could not calculate properties for {}".format(mol))
@@ -199,7 +196,7 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
               "num_valid": num_valid,
               "num_mols": len(output_molecules),
               "success_frac": successful_seeds / num_seeds,
-              "yield": len(output_molecules) / num_seeds}
+              "yield": num_valid / num_seeds}
 
     if data_file:
         output["num_novel"] = num_novel
@@ -254,16 +251,16 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1, dat
                 rd_mol = Chem.MolFromSmiles(mol)
                 if rd_mol:
                     success = True
-                # check if novel
-                if data_file:
-                    if mol not in canon_structs:
-                        num_novel +=1
                 # keep if unique
                 if mol not in output_molecules:
                     output_molecules.append(mol)
+
                     # mol is None if it wasn't a valid SMILES str
                     if rd_mol:
                         num_valid += 1
+                        if data_file:
+                            if not Chem.MolToSmiles(rd_mol) in canon_structs:
+                                num_novel += 1
                         try:
                             gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
                         except:
@@ -278,7 +275,7 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1, dat
               "num_mols": len(output_molecules),
               "num_valid": num_valid,
               "success_frac": successful_seeds / nseeds,
-              "yield": len(output_molecules) / nseeds}
+              "yield": num_valid / nseeds}
     if data_file:
         output["num_novel"] = num_novel
 
