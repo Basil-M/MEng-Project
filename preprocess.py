@@ -10,6 +10,7 @@ from keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
 from os.path import exists
 from dataloader import SmilesToArray
+import pygtrie  # For prefix tree
 
 MAX_NUM_ROWS = 100000
 SMILES_COL_NAME = 'structure'
@@ -62,11 +63,13 @@ def main():
         print("Generating text file of canonicalised chemicals")
         print("May take a while...")
         num_mols = len(data[args.smiles_column])
-        canon_structs = []
+        canon_structs = pygtrie.StringTrie()
         for idx in progressbar.progressbar(range(num_mols)):
             mol = Chem.MolFromSmiles(''.join(data[args.smiles_column][idx]))
             if mol:
-                canon_structs.append(Chem.MolToSmiles(mol))
+                canon_name = Chem.MolToSmiles(mol)
+                canon_structs[canon_name] = canon_name
+
         with open(txt_file, mode='wb') as f:
             pickle.dump(canon_structs, f, pickle.HIGHEST_PROTOCOL)
     else:

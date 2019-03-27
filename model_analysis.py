@@ -9,7 +9,7 @@ import numpy as np
 import progressbar
 from keras.optimizers import Adam
 from scipy.stats import kurtosis
-
+import pygtrie      # for prefix tree
 from molecules.model import TriTransformer, MoleculeVAE, SequenceInference
 from utils import load_dataset, load_properties, AttnParams
 
