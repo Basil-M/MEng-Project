@@ -93,6 +93,7 @@ def main():
     params["bottleneck"] = args.bottleneck
     params["stddev"] = 1
     params["model_arch"] = "TRANSFORMER"
+    params["latent_dim"] = args.latent_dim
     # Get training and test data from data file
     # Set up model
     if args.model_size == "small":
@@ -224,9 +225,9 @@ def main():
                                              num_seeds=300,
                                              num_decodings=3,
                                              SeqInfer=SeqInfer,
-                                             beam_width=5)
+                                             beam_width=5, data_file='data/zinc12.h5')
 
-        rand_output = rand_mols(400, params["latent_dim"], SeqInfer, 5)
+        rand_output = rand_mols(400, params["latent_dim"], SeqInfer, 5, data_file='data/zinc12.h5')
 
     if results:
         print("\tValidation accuracy:\t {:.2f}".format(np.amax(results.history['val_acc'])))
@@ -236,7 +237,7 @@ def main():
         print("BY", mode)
         print("\tGenerated {} molecules, of which {} were valid.".format(output["num_mols"], output["num_valid"]))
         print("\t\tValid mols:\t {:.2f}".format(output["num_valid"] / output["num_mols"]))
-        if "num_novel" in output: print("\tNovel mols:\t{:.2f}".format(output["num_novel"]))
+        if "num_novel" in output: print("\t\tNovel mols:\t{:.2f}".format(output["num_novel"]))
         print("\t\tSuccess frac:\t{:.2f}".format(output["success_frac"]))
         print("\t\tYield:\t{:.2f}".format(output["yield"]))
         for (i, key) in enumerate(utils.rdkit_funcs):

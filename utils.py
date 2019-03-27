@@ -75,9 +75,6 @@ class epoch_track(Callback):
         return
 
     def on_train_end(self, logs={}):
-        if not self._params["ae_trained"]:
-            self._params["current_epoch"] = 1
-            self._params["ae_trained"] = True
         self._params.save(self._filename)
         return
 
@@ -357,7 +354,6 @@ class AttnParams:
     _params = None
 
     def __init__(self):
-        self._training_params = ["current_epoch", "ae_trained"]
         self._params = {
             "model": None,
             "data": None,  # Data stuff
@@ -457,7 +453,7 @@ class AttnParams:
 
     def equals(self, other_params):
         for key in self._params:
-            if other_params[key] != self._params[key] and key not in self._training_params:
+            if other_params[key] != self._params[key]:
                 return False
         return True
 
@@ -469,12 +465,12 @@ class AttnParams:
 class DefaultDecoderParams(AttnParams):
     def __init__(self):
         super().__init__()
-        self["layers"] = 3
-        self["d_model"] = 64
-        self["d_inner_hid"] = 512
-        self["d_k"] = 8
-        self["d_v"] = 8
-        self["heads"] = 8
+        self["layers"] = 4
+        self["d_model"] = 160
+        self["d_inner_hid"] = 1024
+        self["d_k"] = 16
+        self["d_v"] = 16
+        self["heads"] = 10
 
 
 class TokenList:

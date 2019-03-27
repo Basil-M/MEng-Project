@@ -114,14 +114,15 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
     data_test = list(data_test[indices])
     props_test = props_test[indices, :]
     successful_seeds = 0
-
+    num_valid = 0
     output_molecules = []
     num_novel = -1
     if data_file:
-        _, ext = os.path.splitext('/path/to/somefile.ext')
-        if ext == ".h5":
-            data_file.replace(".h5", ".pkl")
-        canon_structs = pickle.load(data_file)
+        path, ext = os.path.splitext(data_file)
+        if ext != ".pkl":
+            data_file = path + ".pkl"
+        with open(data_file, 'rb') as pickle_file:
+            canon_structs = pickle.load(pickle_file)
         num_novel = 0
 
     # define decoding function
@@ -139,7 +140,7 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
         progressbar.Bar(),
         ' (', progressbar.ETA(), ') ',
     ]
-    with progressbar.ProgressBar(maxval=num_seeds * num_decodings, widgets=widgets) as bar:
+    with progressbar.ProgressBar(maxval=num_seeds * num_decodings, widgets=widgets, redirect_stdout=True) as bar:
         for seq in data_test:
             # get mean/variance
             mu, logvar = SeqInfer.model.encode.predict_on_batch(np.expand_dims(seq, 0))
@@ -154,18 +155,22 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
                     rd_mol = Chem.MolFromSmiles(mol)
                     if rd_mol:
                         success = True
-
+                    if data_file:
+                        if mol not in canon_structs:
+                            num_novel+=1
                     # keep if unique
                     if mol not in output_molecules:
                         output_molecules.append(mol)
                         if rd_mol:
+                            num_valid +=1
                             try:
                                 gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
                                 if num_novel != -1:
                                     if not Chem.MolToSmiles(mol) in canon_structs:
                                         num_novel += 1
                             except:
-                                print("Could not calculate properties for {}".format(Chem.MolToSmiles(mol)))
+                                 pass
+#                                print("Could not calculate properties for {}".format(mol))
                 if success: successful_seeds += 1
                 bar_i += 1
                 bar.update(bar_i)
@@ -191,7 +196,7 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
 
     output = {"gen_props": np.array(gen_props),
               "output_mols": output_molecules,
-              "num_valid": len(gen_props),
+              "num_valid": num_valid,
               "num_mols": len(output_molecules),
               "success_frac": successful_seeds / num_seeds,
               "yield": len(output_molecules) / num_seeds}
@@ -217,13 +222,15 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1, dat
         output = lambda x: [SeqInfer.decode_sequence_fast(input_seq=x)]
     else:
         output = lambda x: np.array(SeqInfer.beam_search(input_seq=None, topk=beam_width, moments=[x]))
-
+    num_valid = 0
     num_novel = -1
     if data_file:
-        _, ext = os.path.splitext('/path/to/somefile.ext')
-        if ext == ".h5":
-            data_file.replace(".h5", ".pkl")
-        canon_structs = pickle.load(data_file)
+        data_path, ext = os.path.splitext(data_file)
+        if ext != '.pkl':
+            data_file = data_path + ".pkl"
+
+        with open(data_file, 'rb') as pickle_file:
+            canon_structs = pickle.load(pickle_file)
         num_novel = 0
 
     successful_seeds = 0  # Track number of latent space points which give a valid decoding
@@ -236,7 +243,7 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1, dat
         ' (', progressbar.ETA(), ') ',
     ]
 
-    with progressbar.ProgressBar(maxval=nseeds, widgets=widgets) as bar:
+    with progressbar.ProgressBar(maxval=nseeds, widgets=widgets, redirect_stdout=True) as bar:
         for bar_i in range(nseeds):
             z_i = np.random.randn(latent_dim)
             s = output(z_i)
@@ -247,19 +254,21 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1, dat
                 rd_mol = Chem.MolFromSmiles(mol)
                 if rd_mol:
                     success = True
-
+                # check if novel
+                if data_file:
+                    if mol not in canon_structs:
+                        num_novel +=1
                 # keep if unique
                 if mol not in output_molecules:
                     output_molecules.append(mol)
                     # mol is None if it wasn't a valid SMILES str
                     if rd_mol:
+                        num_valid += 1
                         try:
                             gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
                         except:
-                            print("Could not calculate properties for {}".format(
-                                Chem.MolToSmiles(mol)))  # bar.update(bar_i)
-                    else:
-                        print("\t\t\tNot valid")
+                            pass
+                            #print("Could not calculate properties for {}".format(mol))  # bar.update(bar_i)
             if success: successful_seeds += 1
             bar.update(bar_i)
 
@@ -267,7 +276,7 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1, dat
     output = {"gen_props": np.array(gen_props),
               "output_mols": output_molecules,
               "num_mols": len(output_molecules),
-              "num_valid": len(gen_props),
+              "num_valid": num_valid,
               "success_frac": successful_seeds / nseeds,
               "yield": len(output_molecules) / nseeds}
     if data_file:
