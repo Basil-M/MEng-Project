@@ -8,7 +8,7 @@ from os.path import exists
 import numpy as np
 import tensorflow as tf
 from keras import backend as K
-
+from shutil import rmtree
 import utils
 from train import trainTransformer
 
@@ -43,6 +43,7 @@ mnames = {"average1": "AVG1",
           "ar1": "AR1",
           "ar2": "AR2",
           "ar_log": "ARlog",
+          "ar_s": "ARslim",
           "gru_attn": "GRUa",
           "gru": "GRU",
           "conv": "CONV"}
@@ -65,7 +66,7 @@ def get_arguments():
                         help='Number of samples to process per minibatch during training.')
     parser.add_argument('--bottleneck', type=str, metavar='N', default="gru_attn",
                         help='Choice of bottleneck')
-    parser.add_argument('--model_size', type=str, metavar='N', default="small",
+    parser.add_argument('--model_size', type=str, metavar='N', default="medium",
                         help='Number of samples to process per minibatch during training.')
     parser.add_argument('--latent_dim', type=int, metavar='N', default=60,
                         help='Latent dimension')
@@ -82,6 +83,9 @@ def main():
     model_dir = args.models_dir + model_name + "/"
     if not os.path.exists(model_dir):
         os.mkdir(model_dir)
+    else:
+        rmtree(model_dir)
+        os.mkdir(model_dir)
     # Get default attention parameters
     params = utils.AttnParams()
 
@@ -90,51 +94,74 @@ def main():
     params["batch_size"] = args.batch_size
     params["kl_pretrain_epochs"] = 2
     params["kl_anneal_epochs"] = 3
-    params["bottleneck"] = args.bottleneck
+    params["bottleneck"] = "ar_slim" #args.bottleneck
     params["stddev"] = 1
     params["model_arch"] = "TRANSFORMER"
     params["latent_dim"] = args.latent_dim
     # Get training and test data from data file
     # Set up model
     if args.model_size == "small":
-        # small avg:    41609
-        # small ar_log: 111409
-        # small GRU:    48688
-        # small CONV:   47989
+        # AVG1:     47741
+        # AVG2:     53216
+        # GRU:      51076
+        # GRU_ATTN: 50806
+        # CONV:     51629
+        # AR_SLIM:  58394
 
         params["d_model"] = 32
         params["d_inner_hid"] = 196
         params["d_k"] = 6
         params["heads"] = 6
         params["layers"] = 2
-        if "ar" in args.bottleneck:
+        if params["bottleneck"] == "ar_slim":
+            params["ID_layers"] = 3
+            params["ID_d_model"] = 6
+            params["ID_width"] = 6
+            params["ID_d_inner_hid"] = 30
+            params["ID_d_k"] = 4
+            params["ID_d_v"] = 4
+            params["ID_heads"] = 5
+        elif "ar" in params["bottleneck"]:
             params["ID_layers"] = 2
-            params["ID_d_model"] = 24
-            params["ID_d_inner_hid"] = 128
+            params["ID_d_model"] = 8
+            params["ID_d_inner_hid"] = 64
             params["ID_width"] = 4
             params["ID_d_k"] = 6
             params["ID_d_v"] = 6
             params["ID_heads"] = 4
-        elif "gru" in args.bottleneck:
+        elif params["bottleneck"] == "gru":
             params["ID_layers"] = 3
             params["ID_d_model"] = 48
-        elif args.bottleneck == "conv":
-            params["ID_layers"] = 2
-            params["ID_d_k"] = 5
-            params["ID_d_model"] = 64
+        elif params["bottleneck"] == "gru_attn":
+            params["ID_layers"] = 3
+            params["ID_d_model"] = 42
+        elif params["bottleneck"] == "conv":
+            params["ID_layers"] = 2     # num layers
+            params["ID_d_k"] = 5        # min_filt_size/num
+            params["ID_d_model"] = 64   # dense dim
 
     elif args.model_size == "medium":
-        # medium avg:       179865
-        # medium ar_log:    285601
-        # medium GRU:       176288
-        # medium CONV:      134700
+        # AVG1:     171413
+        # AVG2:     174488
+        # GRU:      172664
+        # GRU_ATTN: 171308
+        # CONV:     171800
+        # AR_SLIM:  184968
         params["d_model"] = 64
-        params["d_inner_hid"] = 296
+        params["d_inner_hid"] = 256
         params["d_k"] = 8
         params["heads"] = 8
         params["layers"] = 3
 
-        if "ar" in args.bottleneck:
+        if params["bottleneck"] == "ar_slim":
+            params["ID_layers"] = 4
+            params["ID_d_model"] = 8
+            params["ID_width"] = 6
+            params["ID_d_inner_hid"] = 64
+            params["ID_d_k"] = 4
+            params["ID_d_v"] = 4
+            params["ID_heads"] = 4
+        elif "ar" in params["bottleneck"]:
             params["ID_layers"] = 2
             params["ID_d_model"] = 32
             params["ID_width"] = 4
@@ -142,13 +169,16 @@ def main():
             params["ID_d_k"] = 7
             params["ID_d_v"] = 7
             params["ID_heads"] = 5
-        elif "gru" in args.bottleneck:
+        elif params["bottleneck"] == "gru_attn":
             params["ID_layers"] = 4
-            params["ID_d_model"] = 72
-        elif args.bottleneck == "conv":
+            params["ID_d_model"] = 78
+        elif params["bottleneck"] == "gru":
+            params["ID_layers"] = 4
+            params["ID_d_model"] = 82
+        elif params["bottleneck"] == "conv":
             params["ID_layers"] = 4
             params["ID_d_k"] = 8
-            params["ID_d_model"] = 128
+            params["ID_d_model"] = 156
 
     elif args.model_size == "big":
         # big avg:      1,131,745
@@ -161,7 +191,7 @@ def main():
         params["heads"] = 12
         params["layers"] = 4
 
-        if "ar" in args.bottleneck:
+        if "ar" in params["bottleneck"]:
             params["ID_layers"] = 3
             params["ID_d_model"] = 40
             params["ID_width"] = 4
@@ -169,10 +199,10 @@ def main():
             params["ID_d_k"] = 8
             params["ID_d_v"] = 8
             params["ID_heads"] = 6
-        elif "gru" in args.bottleneck:
+        elif "gru" in params["bottleneck"]:
             params["ID_layers"] = 5
             params["ID_d_model"] = 160
-        elif args.bottleneck == "conv":
+        elif params["bottleneck"] == "conv":
             params["ID_layers"] = 6
             params["ID_d_k"] = 10
             params["ID_d_model"] = 512

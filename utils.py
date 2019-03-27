@@ -383,9 +383,9 @@ class AttnParams:
             "ID_d_model": None,
             "ID_d_inner_hid": None,
             "ID_heads": None,
-            "ID_d_k": 64,
+            "ID_d_k": None,
             "ID_d_v": None,
-            "ID_layers": 3,
+            "ID_layers": None,
             "ID_width": None,
             "num_params": None
         }
