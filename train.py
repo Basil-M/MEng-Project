@@ -237,6 +237,8 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
                                         validation_data=(data_test, None),
                                         callbacks=cb)
 
+        params.load(model_dir + "params.pkl") # update params
+
         model_trained = params["current_epoch"] > params["epochs"]
 
     return model, results

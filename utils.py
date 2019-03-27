@@ -43,7 +43,7 @@ class epoch_track(Callback):
         self._filename = param_filename
         if csv_track:
             models_dir = dirname(dirname(param_filename))
-            self.csv_filename = models_dir + "runs.csv"
+            self.csv_filename = models_dir + "/runs.csv"
             self.rownum, _ = params.dumpToCSV(self.csv_filename)
         else:
             self.csv_filename = None
@@ -408,6 +408,9 @@ class AttnParams:
     def save(self, fn):
         with open(fn, mode='wb') as f:
             pickle.dump(self._params, f, pickle.HIGHEST_PROTOCOL)
+
+    def __len__(self):
+        return len(self._params)
 
     def setIDparams(self):
         # Will by default set interim decoder parameters

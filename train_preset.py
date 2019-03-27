@@ -8,7 +8,7 @@ from os.path import exists
 import numpy as np
 import tensorflow as tf
 from keras import backend as K
-from shutil import rmtree
+
 import utils
 from train import trainTransformer
 
@@ -83,9 +83,6 @@ def main():
     model_dir = args.models_dir + model_name + "/"
     if not os.path.exists(model_dir):
         os.mkdir(model_dir)
-    else:
-        rmtree(model_dir)
-        os.mkdir(model_dir)
     # Get default attention parameters
     params = utils.AttnParams()
 
@@ -136,9 +133,9 @@ def main():
             params["ID_layers"] = 3
             params["ID_d_model"] = 42
         elif params["bottleneck"] == "conv":
-            params["ID_layers"] = 2     # num layers
-            params["ID_d_k"] = 5        # min_filt_size/num
-            params["ID_d_model"] = 64   # dense dim
+            params["ID_layers"] = 2  # num layers
+            params["ID_d_k"] = 5  # min_filt_size/num
+            params["ID_d_model"] = 64  # dense dim
 
     elif args.model_size == "medium":
         # AVG1:     171413
@@ -246,7 +243,8 @@ def main():
     model, results = trainTransformer(params=params, data_file=args.data,
                                       model_dir=model_dir)
 
-    data_train, data_test, _, _, tokens = utils.load_dataset(args.data, "onehot" if args.bottleneck == "conv" else "cat",
+    data_train, data_test, _, _, tokens = utils.load_dataset(args.data,
+                                                             "onehot" if args.bottleneck == "conv" else "cat",
                                                              params["pp_weight"])
     props_train, props_test, prop_labels = utils.load_properties(args.data)
 
@@ -254,34 +252,47 @@ def main():
 
     with supress_stderr():
         seed_output = property_distributions(data_test[0], props_test,
-                                             num_seeds=300,
+                                             num_seeds=1000,
                                              num_decodings=3,
                                              SeqInfer=SeqInfer,
                                              beam_width=5, data_file='data/zinc12.h5')
 
-        rand_output = rand_mols(400, params["latent_dim"], SeqInfer, 5, data_file='data/zinc12.h5')
+        rand_output = rand_mols(1000, params["latent_dim"], SeqInfer, 5, data_file='data/zinc12.h5')
 
-    if results:
-        print("\tValidation accuracy:\t {:.2f}".format(np.amax(results.history['val_acc'])))
-        # TODO(Basil): Add getting results from CSV file...
+    print("\tValidation accuracy:\t {:.2f}".format(getBestValAcc(args.modes_dir + "/runs.csv", model_name=model_name)))
+    # TODO(Basil): Add getting results from CSV file...
 
     for (mode, output) in zip(["SAMPLING PRIOR", "SAMPLING WITH SEEDS"], [seed_output, rand_output]):
         print("BY", mode)
-        print("\tGenerated {} molecules, of which {} were valid and {} were novel.".format(output["num_mols"], output["num_valid"], output["num_novel"]))
+        print("\tGenerated {} molecules, of which {} were valid and {} were novel.".format(output["num_mols"],
+                                                                                           output["num_valid"],
+                                                                                           output["num_novel"]))
         print("\t\tValid mols:\t {:.2f}".format(output["num_valid"] / output["num_mols"]))
-        if "num_novel" in output: print("\t\tNovel mols:\t{:.2f}".format(output["num_novel"]/output["num_valid"]))
+        if "num_novel" in output: print("\t\tNovel mols:\t{:.2f}".format(output["num_novel"] / output["num_valid"]))
         print("\t\tSuccess frac:\t{:.2f}".format(output["success_frac"]))
         print("\t\tYield:\t{:.2f}".format(output["yield"]))
+
         for (i, key) in enumerate(utils.rdkit_funcs):
             if key in prop_labels:
                 k = prop_labels.index(key)
-
                 print("\t\t{}:".format(key))
                 dat = props_test[:, k]
                 print("\t\t\tTest distribution:\t {:.2f} ± {:.2f}".format(np.mean(dat), np.std(dat)))
 
                 gen_dat = output["gen_props"][:, i]
                 print("\t\t\tGenerated distribution:\t {:.2f} ± {:.2f}".format(np.mean(gen_dat), np.std(gen_dat)))
+
+
+def getBestValAcc(csv_dir, model_name):
+    arr = np.genfromtxt(csv_dir, delimiter=",", dtype=str)
+    # pad column if necessary
+    num_params = len(utils.AttnParams())
+    rownum = np.where(arr[:, 0] == model_name)[0][0]
+    arr = arr[rownum, :]
+    arr = np.array(arr)
+    arr = arr[num_params + 2:]
+    arr = arr[range(1, len(arr), 2)]
+    return np.max(arr)
 
 
 if __name__ == '__main__':
