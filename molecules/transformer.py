@@ -364,7 +364,8 @@ class AvgLatent3():
 
 
 class ConvEncoder():
-    def __init__(self, layers, min_filt_size, min_filt_num, latent_dim, dense_dim):
+    def __init__(self, layers, min_filt_size, min_filt_num, latent_dim, dense_dim, word_emb):
+        self.word_emb = word_emb
         self.layers = []
         for i in range(layers):
             d = min_filt_size + i
@@ -375,7 +376,8 @@ class ConvEncoder():
         self.mean_layer = Dense(latent_dim, name='z_mean')
         self.logvar_layer = Dense(latent_dim, name='z_logvar')
 
-    def __call__(self, h):
+    def __call__(self, x):
+        h = self.word_emb(x)
         for layer in self.layers:
             h = layer(h)
 
@@ -1077,7 +1079,7 @@ class InterimDecoder5():
                                                                enc_output.get_shape()], name='ID2_LOOP')
 
             # flatten the vector
-            #return K.batch_flatten(z_embedded)
+            # return K.batch_flatten(z_embedded)
             return K.reshape(z_embedded, [-1, int(self.len * self.d_model)])
 
         z_emb = Lambda(the_loop)(z_init)

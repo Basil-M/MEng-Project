@@ -113,7 +113,8 @@ class TriTransformer:
                                           min_filt_size=self.p["ID_d_k"],
                                           min_filt_num = self.p["ID_d_k"],
                                           latent_dim=self.p["latent_dim"],
-                                          dense_dim =self.p["ID_d_model"])
+                                          dense_dim =self.p["ID_d_model"],
+                                          word_emb=self.word_emb)
         else:
             self.use_src_pos = True
             self.encoder = TransformerEncoder(params=params, tokens=i_tokens,
@@ -175,7 +176,8 @@ class TriTransformer:
         tgt_pos = Lambda(self.get_pos_seq)(tgt_seq)
 
         if self.p["bottleneck"] == "conv":
-            src_seq = Input(shape=(self.p["len_limit"], self.i_tokens.num()), name='src_seq')
+            # must fully specify shape for convolutional approach
+            src_seq = Input(shape=(self.p["len_limit"],), name='src_seq')
         else:
             src_seq = Input(shape=(None,), dtype='int32', name='src_seq')
 

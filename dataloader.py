@@ -119,7 +119,7 @@ def MakeSmilesDict(fn=None, min_freq=5, dict_file=None):
 #     return train_data, test_data, train_pps, test_pps
 #
 
-def SmilesToArray(xs, tokens, max_len=999):
+def SmilesToArray(xs, tokens, length=999):
     '''
     Tokenizes list of smiles strings
     :param xs: List of smiles strings e.g. ['C1ccccc','C1cc=O',...]
@@ -133,14 +133,15 @@ def SmilesToArray(xs, tokens, max_len=999):
     #     xs = [x[0] for x in xs]
 
     # find longest string
-    longest = np.max([len(x) for x in xs])
-    longest = min(longest + 2, max_len)
 
-    X = np.zeros((len(xs), longest), dtype='int32')
+    # longest = np.max([len(x) for x in xs])
+    # longest = min(longest + 2, max_len)
+
+    X = np.zeros((len(xs), length), dtype='int32')
     X[:, 0] = tokens.startid()
     for i, x in enumerate(xs):
         # print("Padding {}".format(x))
-        x = x[:max_len - 2]
+        x = x[:length - 2]
 
         skipnext = False
         k = 1

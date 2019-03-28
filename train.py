@@ -134,13 +134,13 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
     if data_file:
         data_train, data_test, props_train, props_test, tokens = load_dataset(data_file, "cat",
                                                                               params["pp_weight"])
-        if params["bottleneck"] == "conv":
-            data_train_onehot, data_test_onehot, _, _, _ = load_dataset(data_file, "onehot", False)
-            data_train = [data_train_onehot, data_train]
-            data_test = [data_test_onehot, data_test]
-        else:
-            data_train = [data_train, data_train]
-            data_test = [data_test, data_test]
+        # if params["bottleneck"] == "conv":
+        #     data_train_onehot, data_test_onehot, _, _, _ = load_dataset(data_file, "onehot", False)
+        #     data_train = [data_train_onehot, data_train]
+        #     data_test = [data_test_onehot, data_test]
+        # else:
+        data_train = [data_train, data_train]
+        data_test = [data_test, data_test]
 
         # add properties
         if props_train is not None:

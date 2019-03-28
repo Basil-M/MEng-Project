@@ -12,11 +12,11 @@ from os.path import exists
 from dataloader import SmilesToArray
 import pygtrie  # For prefix tree
 
-MAX_NUM_ROWS = 100000
+MAX_NUM_ROWS = 1000
 SMILES_COL_NAME = 'structure'
 DICT_LOC = 'data/SMILES_dict.txt'
 INFILE = 'data/zinc12.h5'
-OUTFILE = 'data/zinc_100k.h5'
+OUTFILE = 'data/zinc_1k.h5'
 
 from utils import rdkit_funcs, TokenList
 from rdkit import Chem
@@ -58,9 +58,9 @@ def main():
 
     # We save a list of canonicalised chemicals so that we can later check
     # Whether generated molecules were in the dataset
-    txt_file = args.infile.replace(".h5", ".pkl")
-    if not exists(txt_file):
-        print("Generating text file of canonicalised chemicals")
+    pkl_file = args.infile.replace(".h5", ".pkl")
+    if not exists(pkl_file):
+        print("Generating prefix tree of canonicalised chemicals")
         print("May take a while...")
         num_mols = len(data[args.smiles_column])
         canon_structs = pygtrie.StringTrie()
@@ -70,10 +70,12 @@ def main():
                 canon_name = Chem.MolToSmiles(mol)
                 canon_structs[canon_name] = canon_name
 
-        with open(txt_file, mode='wb') as f:
+        with open(pkl_file, mode='wb') as f:
             pickle.dump(canon_structs, f, pickle.HIGHEST_PROTOCOL)
     else:
-        canon_structs = pickle.load(txt_file)
+        print("Loading prefix tree of canonicalised chemicals")
+        with open(pkl_file, mode='rb') as f:
+            canon_structs = pickle.load(f)
 
     keys = data[args.smiles_column].map(len) < args.max_len + 1
     if args.length <= len(keys):
@@ -130,8 +132,8 @@ def main():
     # TODO(Basil): Fix ugly hack with the length of Xs...
     h5f = h5py.File(args.outfile, 'w')
     tokens = TokenList(charset)
-    transformer_train = SmilesToArray(train_str, tokens, args.max_len)
-    transformer_test = SmilesToArray(test_str, tokens, args.max_len)
+    transformer_train = SmilesToArray(train_str, tokens, length=args.max_len)
+    transformer_test = SmilesToArray(test_str, tokens, length=args.max_len)
 
     h5f.create_dataset('cat/train', data=transformer_train)
     h5f.create_dataset('cat/test', data=transformer_test)

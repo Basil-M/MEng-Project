@@ -64,9 +64,9 @@ def get_arguments():
                         help='Number of epochs to run during training.')
     parser.add_argument('--batch_size', type=int, metavar='N', default=40,
                         help='Number of samples to process per minibatch during training.')
-    parser.add_argument('--bottleneck', type=str, metavar='N', default="gru_attn",
+    parser.add_argument('--bottleneck', type=str, metavar='N', default="conv",
                         help='Choice of bottleneck')
-    parser.add_argument('--model_size', type=str, metavar='N', default="medium",
+    parser.add_argument('--model_size', type=str, metavar='N', default="small",
                         help='Number of samples to process per minibatch during training.')
     parser.add_argument('--latent_dim', type=int, metavar='N', default=60,
                         help='Latent dimension')
