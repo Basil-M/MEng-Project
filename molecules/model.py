@@ -504,6 +504,10 @@ class TriTransformer:
         return self.decode_from_sample(z, beam_width=beam_width, delimiter='')
 
     def decode_from_sample(self, sample, beam_width, delimiter=''):
+        sample = np.array(sample)
+        if sample.ndim == 1:
+            sample = np.expand_dims(sample, axis=0)
+
         if beam_width == 1:
             return self._decode_sequence_fast(z=sample, delimiter=delimiter)
         else:
@@ -546,6 +550,7 @@ class TriTransformer:
         return delimiter.join(decoded_tokens[:-1])
 
     def _beam_search(self, z, topk=5, delimiter=''):
+
         z = z.repeat(topk, 0)
 
         final_results = []

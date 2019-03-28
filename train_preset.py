@@ -63,7 +63,7 @@ def get_arguments():
                         help='Number of epochs to run during training.')
     parser.add_argument('--batch_size', type=int, metavar='N', default=40,
                         help='Number of samples to process per minibatch during training.')
-    parser.add_argument('--bottleneck', type=str, metavar='N', default="conv",
+    parser.add_argument('--bottleneck', type=str, metavar='N', default="average1",
                         help='Choice of bottleneck')
     parser.add_argument('--model_size', type=str, metavar='N', default="small",
                         help='Number of samples to process per minibatch during training.')
@@ -86,10 +86,10 @@ def main():
     params = utils.AttnParams()
 
     # Standard training params
-    params["epochs"] = args.epochs
+    params["epochs"] = 1  # args.epochs
     params["batch_size"] = args.batch_size
-    params["kl_pretrain_epochs"] = 2
-    params["kl_anneal_epochs"] = 3
+    params["kl_pretrain_epochs"] = 0
+    params["kl_anneal_epochs"] = 0
     params["bottleneck"] = args.bottleneck
     params["stddev"] = 1
     params["decoder"] = "TRANSFORMER"
@@ -248,23 +248,32 @@ def main():
                                                              params["pp_weight"])
     props_train, props_test, prop_labels = utils.load_properties(args.data)
 
+    num_seeds = 1000
+    num_decodings = 3
+    num_prior_samples = 1000
     with supress_stderr():
         seed_output = property_distributions(data_test[0], props_test,
-                                             num_seeds=1000,
-                                             num_decodings=3,
+                                             num_seeds=num_seeds,
+                                             num_decodings=num_decodings,
                                              model=model,
-                                             beam_width=5, data_file='data/zinc12.h5')
+                                             beam_width=5 , data_file='data/zinc12.h5')
+        rand_output = rand_mols(num_prior_samples, params["latent_dim"], model, 5 , data_file='data/zinc12.h5')
 
-        rand_output = rand_mols(1000, params["latent_dim"], model, 5, data_file='data/zinc12.h5')
-
-    print("\tValidation accuracy:\t {:.2f}".format(getBestValAcc(args.models_dir + "/runs.csv", model_name=model_name)))
+    # SAVE DATA
+    val_acc = getBestValAcc(args.models_dir + "/runs.csv", model_name=model_name)
+    createResultsFile(args.models_dir)
+    saveResults(params, val_acc, seed_output, rand_output, num_seeds, num_decodings, num_prior_samples,
+                models_dir=args.models_dir)
+    print("\tValidation accuracy:\t {:.2f}".format(val_acc))
     # TODO(Basil): Add getting results from CSV file...
-    d = [params["model"]]
+
     for (mode, output) in zip(["SAMPLING PRIOR", "SAMPLING WITH SEEDS"], [seed_output, rand_output]):
         print("BY", mode)
+
         print("\tGenerated {} molecules, of which {} were valid and {} were novel.".format(output["num_mols"],
                                                                                            output["num_valid"],
                                                                                            output["num_novel"]))
+
         print("\t\tValid mols:\t {:.2f}".format(output["num_valid"] / output["num_mols"]))
         if "num_novel" in output: print("\t\tNovel mols:\t{:.2f}".format(output["num_novel"] / output["num_valid"]))
         print("\t\tSuccess frac:\t{:.2f}".format(output["success_frac"]))
@@ -288,9 +297,69 @@ def getBestValAcc(csv_dir, model_name):
     rownum = np.where(arr[:, 0] == model_name)[0][0]
     arr = arr[rownum, :]
     arr = np.array(arr)
-    arr = arr[num_params + 2:]
+    arr = arr[num_params:]
     arr = arr[range(1, len(arr), 2)]
+
+    def isnum(n):
+        try:
+            n = float(n)
+            return True
+        except:
+            return False
+
+    arr = np.array([a for a in arr if isnum(a)], dtype=float)
     return np.max(arr)
+
+
+def createResultsFile(models_dir):
+    if not os.path.exists(models_dir + "/samplingresults.csv"):
+        def append_titles(d):
+            d.extend(["num_unique", "num_valid", "num_novel",
+                      "frac_valid", "frac_novel", "p_success",
+                      "yield"])
+            for prop in utils.rdkit_funcs:
+                d.append("{}_mean".format(prop))
+                d.append("{}_std".format(prop))
+
+        d = ["Model name",
+             "Epochs",
+             "Val_acc",
+             "S: Num seeds",
+             "S: Num decodings"]
+        append_titles(d)
+        d.append("PS: Num points")
+        append_titles(d)
+
+        np.savetxt(models_dir + "/samplingresults.csv", np.array(d), delimiter=",", fmt='%s')
+
+
+def saveResults(params, val_acc, seeded_output, prior_output, num_seeds, num_decodings, num_prior_samples, models_dir):
+    def append_output(output, d):
+        d.append(seeded_output["num_mols"])
+        d.append(output["num_valid"])
+        d.append(output["num_novel"])
+        d.append(np.round(output["num_valid"] / output["num_mols"], 3))
+        d.append(np.round(output["num_novel"] / output["num_mols"], 3))
+        d.append(np.round(output["success_frac"], 3))
+        d.append(np.round(output["yield"], 3))
+        for (i, prop) in enumerate(utils.rdkit_funcs):
+            d.append(np.round(np.mean(output["gen_props"][:, i]), 3))
+            d.append(np.round(np.std(output["gen_props"][:, i]), 3))
+
+    d = [params["model"], params["epochs"], val_acc, num_seeds, num_decodings]
+    append_output(seeded_output, d)
+    d.append(num_prior_samples)
+    append_output(prior_output, d)
+
+    arr = np.genfromtxt(models_dir + "/samplingresults.csv", delimiter=",", dtype=str)
+    if arr.ndim == 1:
+        arr = np.expand_dims(arr, 0)
+    if np.shape(arr)[1] != len(d):
+        arr = arr.T
+    s = np.array(d)
+    print(np.shape(s))
+    arr = np.vstack([arr, np.expand_dims(np.array(d), 0)])
+    np.savetxt(models_dir + "/samplingresults.csv", arr, delimiter=",", fmt='%s')
 
 
 if __name__ == '__main__':

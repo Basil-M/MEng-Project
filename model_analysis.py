@@ -142,7 +142,7 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, mode
             for dec_itr in range(num_decodings):
                 # c_output = output(mu,logvar)
                 s = model.decode_from_moments(mu, logvar, beam_width)
-
+                s = np.array(s)
                 if s.ndim > 1: s = s[:, 0]
 
                 success = False  # Track whether we produced a valid molecule from this seed
@@ -237,7 +237,7 @@ def rand_mols(nseeds, latent_dim, model: TriTransformer, beam_width=1, data_file
         for bar_i in range(nseeds):
             z_i = np.random.randn(latent_dim)
             s = model.decode_from_sample(z_i, beam_width=beam_width)
-
+            s = np.array(s)
             if s.ndim > 1: s = s[:, 0]
 
             success = False
