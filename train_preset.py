@@ -28,7 +28,6 @@ DATA = 'data/zinc_100k.h5'
 tf.logging.set_verbosity(tf.logging.ERROR)
 from tensorflow import ConfigProto, Session
 from keras.backend.tensorflow_backend import set_session
-from molecules.model import SequenceInference
 from model_analysis import rand_mols, property_distributions, supress_stderr
 
 ###################################
@@ -93,8 +92,9 @@ def main():
     params["kl_anneal_epochs"] = 3
     params["bottleneck"] = args.bottleneck
     params["stddev"] = 1
-    params["model_arch"] = "TRANSFORMER"
+    params["decoder"] = "TRANSFORMER"
     params["latent_dim"] = args.latent_dim
+    params["model"] = model_name
     # Get training and test data from data file
     # Set up model
     if args.model_size == "small":
@@ -248,20 +248,18 @@ def main():
                                                              params["pp_weight"])
     props_train, props_test, prop_labels = utils.load_properties(args.data)
 
-    SeqInfer = SequenceInference(model, tokens)
-
     with supress_stderr():
         seed_output = property_distributions(data_test[0], props_test,
                                              num_seeds=1000,
                                              num_decodings=3,
-                                             SeqInfer=SeqInfer,
+                                             model=model,
                                              beam_width=5, data_file='data/zinc12.h5')
 
-        rand_output = rand_mols(1000, params["latent_dim"], SeqInfer, 5, data_file='data/zinc12.h5')
+        rand_output = rand_mols(1000, params["latent_dim"], model, 5, data_file='data/zinc12.h5')
 
-    print("\tValidation accuracy:\t {:.2f}".format(getBestValAcc(args.modes_dir + "/runs.csv", model_name=model_name)))
+    print("\tValidation accuracy:\t {:.2f}".format(getBestValAcc(args.models_dir + "/runs.csv", model_name=model_name)))
     # TODO(Basil): Add getting results from CSV file...
-
+    d = [params["model"]]
     for (mode, output) in zip(["SAMPLING PRIOR", "SAMPLING WITH SEEDS"], [seed_output, rand_output]):
         print("BY", mode)
         print("\tGenerated {} molecules, of which {} were valid and {} were novel.".format(output["num_mols"],

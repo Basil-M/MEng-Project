@@ -367,7 +367,7 @@ class AttnParams:
             "WAE_s": 2,
             "stddev": 1,
             "pp_weight": 1.25,
-            "model_arch": "TRANSFORMER",  # Model params
+            "decoder": "TRANSFORMER",  # Model params
             "latent_dim": 32,
             "d_model": 24,
             "d_inner_hid": 196,

@@ -9,8 +9,8 @@ import numpy as np
 import progressbar
 from keras.optimizers import Adam
 from scipy.stats import kurtosis
-import pygtrie      # for prefix tree
-from molecules.model import TriTransformer, MoleculeVAE, SequenceInference
+
+from molecules.model import TriTransformer, MoleculeVAE
 from utils import load_dataset, load_properties, AttnParams
 
 logging.basicConfig()
@@ -50,7 +50,7 @@ def supress_stderr():
 def get_arguments():
     parser = argparse.ArgumentParser(description='Molecular autoencoder analysis')
     parser.add_argument('--model_path', type=str, help='Path to model directory e.g. models/VA_192/',
-                        default="models/gru/")
+                        default="models/test_ms/")
     parser.add_argument('--beam_width', type=int, help='Beam width e.g. 5. If 1, will use greedy decoding.',
                         default=5)
     parser.add_argument('--n_seeds', type=int, help='Number of seeds to use latent exploration',
@@ -103,7 +103,7 @@ def latent_distributions(latents_file, plot_kd=False):
         plt.savefig(filepath)
 
 
-def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqInfer: SequenceInference, beam_width=1,
+def property_distributions(data_test, props_test, num_seeds, num_decodings, model: TriTransformer, beam_width=1,
                            data_file=None, latents_file=None):
     pst = props_test
     # Get num_seeds random points from test data
@@ -125,12 +125,6 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
             canon_structs = pickle.load(pickle_file)
         num_novel = 0
 
-    # define decoding function
-    if beam_width == 1:
-        output = lambda x, y: [SeqInfer.decode_sequence_fast(input_seq=seq, moments=[x, y])]
-    else:
-        output = lambda x, y: np.array(SeqInfer.beam_search(input_seq=seq, topk=beam_width, moments=[x, y]))
-
     # progressbar
     # decode molecules multiple times
     gen_props = []
@@ -143,10 +137,12 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
     with progressbar.ProgressBar(maxval=num_seeds * num_decodings, widgets=widgets, redirect_stdout=True) as bar:
         for seq in data_test:
             # get mean/variance
-            mu, logvar = SeqInfer.model.encode.predict_on_batch(np.expand_dims(seq, 0))
+            mu, logvar = model.get_moments(seq)
+
             for dec_itr in range(num_decodings):
                 # c_output = output(mu,logvar)
-                s = output(mu, logvar)
+                s = model.decode_from_moments(mu, logvar, beam_width)
+
                 if s.ndim > 1: s = s[:, 0]
 
                 success = False  # Track whether we produced a valid molecule from this seed
@@ -159,15 +155,15 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
                     if mol not in output_molecules:
                         output_molecules.append(mol)
                         if rd_mol:
-                            num_valid +=1
+                            num_valid += 1
                             if data_file:
                                 if not Chem.MolToSmiles(rd_mol) in canon_structs:
                                     num_novel += 1
                             try:
                                 gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
                             except:
-                                 pass
-#                                print("Could not calculate properties for {}".format(mol))
+                                pass
+                #                                print("Could not calculate properties for {}".format(mol))
                 if success: successful_seeds += 1
                 bar_i += 1
                 bar.update(bar_i)
@@ -203,22 +199,19 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, SeqI
     return output
 
 
-def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1, data_file=None):
+def rand_mols(nseeds, latent_dim, model: TriTransformer, beam_width=1, data_file=None):
     '''
 
     :param nseeds:
     :param latent_dim:
-    :param SeqInfer:
+    :param model:
     :param beam_width:
+    :param data_file:
     :return:
     '''
     output_molecules = []
     # define decoding function
 
-    if beam_width == 1:
-        output = lambda x: [SeqInfer.decode_sequence_fast(input_seq=x)]
-    else:
-        output = lambda x: np.array(SeqInfer.beam_search(input_seq=None, topk=beam_width, moments=[x]))
     num_valid = 0
     num_novel = -1
     if data_file:
@@ -243,9 +236,10 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1, dat
     with progressbar.ProgressBar(maxval=nseeds, widgets=widgets, redirect_stdout=True) as bar:
         for bar_i in range(nseeds):
             z_i = np.random.randn(latent_dim)
-            s = output(z_i)
+            s = model.decode_from_sample(z_i, beam_width=beam_width)
 
             if s.ndim > 1: s = s[:, 0]
+
             success = False
             for mol in s:
                 rd_mol = Chem.MolFromSmiles(mol)
@@ -265,7 +259,7 @@ def rand_mols(nseeds, latent_dim, SeqInfer: SequenceInference, beam_width=1, dat
                             gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
                         except:
                             pass
-                            #print("Could not calculate properties for {}".format(mol))  # bar.update(bar_i)
+                            # print("Could not calculate properties for {}".format(mol))  # bar.update(bar_i)
             if success: successful_seeds += 1
             bar.update(bar_i)
 
@@ -293,14 +287,14 @@ def main():
     model_params.dump()
     # Get data
     d_file = model_params["data"]
-    if model_params["bottleneck"] == "conv" or model_params["model_arch"] == "VAE":
+    if model_params["bottleneck"] == "conv" or model_params["decoder"] == "VAE":
         d_type = "onehot"
     else:
         d_type = "cat"
     data_train, data_test, props_train, props_test, tokens = load_dataset(d_file, d_type, False)
     props_train, props_test, prop_labels = load_properties(d_file)
 
-    if model_params["model_arch"] == "TRANSFORMER":
+    if model_params["decoder"] == "TRANSFORMER":
         # Model is an attention based model
         model = TriTransformer(tokens, model_params)
         model.build_models()
@@ -308,8 +302,6 @@ def main():
     else:
         # Model is GRU
         model = MoleculeVAE(tokens, model_params)
-
-    SeqInfer = SequenceInference(model, tokens, weights_file=model_dir + "best_model.h5")
 
     # Assess how close each dimension is to a Gaussian
     # Try to load property training data
@@ -328,7 +320,7 @@ def main():
     # Test random molecule
     print("Example decodings with ibruprofen (beam width = 5):")
     print("\tIbuprofen smiles:\t{}".format(IBUPROFEN_SMILES))
-    s = SeqInfer.beam_search(IBUPROFEN_SMILES, 1)
+    s = model.decode_from_string(IBUPROFEN_SMILES, beam_width=5)
     [print("\t\tDecoding {}:\t\t{}".format(i + 1, seq[0])) for (i, seq) in enumerate(s)]
 
     print("Exploring property distributions of chemicals from {} decoding(s) of {} random seed(s):".format(
@@ -336,12 +328,12 @@ def main():
         args.n_seeds))
     with supress_stderr():
         if args.prior_sample:
-            output = rand_mols(args.n_seeds, model_params["latent_dim"], SeqInfer, args.beam_width)
+            output = rand_mols(args.n_seeds, model_params["latent_dim"], model, args.beam_width)
         else:
             output = property_distributions(data_test, props_test,
                                             num_seeds=args.n_seeds,
                                             num_decodings=args.n_decodings,
-                                            SeqInfer=SeqInfer,
+                                            model=model,
                                             beam_width=args.beam_width,
                                             data_file=None)  # ,
 

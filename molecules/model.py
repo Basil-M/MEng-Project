@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 from keras import backend as K
 from keras import objectives
-from keras.layers import Input, Lambda, Dot
+from keras.layers import Input, Lambda
 from keras.layers.convolutional import Convolution1D
 from keras.layers.core import Dense, Flatten, RepeatVector
 from keras.layers.recurrent import GRU
@@ -107,13 +107,13 @@ class TriTransformer:
             self.encoder = tr.GRUEncoder(layers=self.p["ID_layers"], d_gru=self.p["ID_d_model"],
                                          latent_dim=self.p["latent_dim"],
                                          attn=("attn" in self.p["bottleneck"]),
-                                         word_emb = self.word_emb)
+                                         word_emb=self.word_emb)
         elif self.p["bottleneck"] == "conv":
             self.encoder = tr.ConvEncoder(layers=self.p["ID_layers"],
                                           min_filt_size=self.p["ID_d_k"],
-                                          min_filt_num = self.p["ID_d_k"],
+                                          min_filt_num=self.p["ID_d_k"],
                                           latent_dim=self.p["latent_dim"],
-                                          dense_dim =self.p["ID_d_model"],
+                                          dense_dim=self.p["ID_d_model"],
                                           word_emb=self.word_emb)
         else:
             self.use_src_pos = True
@@ -350,49 +350,14 @@ class TriTransformer:
 
             return K.exp((-0.5 / s ** 2) * distances)
 
-        def K_MAT2(A, B):
-            '''
-
-            :param A: Matrix of size [n, D] - each row vector is sample
-            :param B: Matrix of size [n, D] - each row vector is a sample
-            :return: Matrix of size [n, n] - each entry (i,j) is k(a_i,b_j), where
-            a_i is the i'th row of A and b_j is the j'th row of B
-            '''
-            # A = K.transpose(A)
-            B = K.transpose(B)
-            k_vecs = []
-            for i in range(n):
-                a_i = K.expand_dims(A[i, :])  # i'th row of first matrix
-                Ai = K.tile(a_i, [1, n])  # n copies - size [D, n]
-
-                # Will be a row vector of distances
-                # Element j of dists_i = ||ai - bj||
-                dists_i = K.sum(K.square(Ai - B), axis=0)
-                dists_i = debugPrint(dists_i, "DIST {}".format(i))
-                k_vec = K.exp((-1 / s ** 2) * dists_i)
-                k_vecs.append(K.expand_dims(k_vec))
-
-            k_mat = K.concatenate(k_vecs, axis=1)
-
-            return K.transpose(k_mat)
-
-        # k = lambda z1, z2: K.exp(-K.sum(K.square(z1 - z2), axis=1) / (s ** 2))
-
-        ## First term
-        ## 1/n(n+1) sum k(zp_l, zp_j) for all l=/=j
-
-        ## Second term
-        ## 1/n(n+1) sum k(zq_l, zq_j) for all l=/=j
-
         # Set diagonals to zero
         MMD = []
         for samples in [sample_qz, sample_pz]:
-            K_sum = tf.reduce_sum(K_MAT(samples, samples)) - n
-
-            K_sum = debugPrint(K_sum, "K_SUM: ")
             # there will be n diagonals in this matrix equal to 1
             # these shouldn't be included in the sum anyway
             # so simply subtract n after reduce_sum
+            K_sum = tf.reduce_sum(K_MAT(samples, samples)) - n
+
             MMD.append(K_sum / (n * n + n))
 
         # Final term
@@ -503,6 +468,131 @@ class TriTransformer:
                                          expected_rbf(prior_mu, prior_var) -
                                          2 * expected_rbf(mu, var, prior_mu, prior_var))
 
+    def get_moments(self, input):
+        if isinstance(input, str):
+            # have been given a string
+            input_seq = self.i_tokens.tokenize(input)
+        else:
+            input_seq = input
+
+        if self.p["bottleneck"] == "conv":
+            # Must pad with zeros
+            s = np.zeros(self.p["len_limit"])
+            s[0:len(input_seq)] = input_seq
+            input_seq = s
+
+        # get mean & logvar
+        input_seq = np.expand_dims(input_seq, axis=0)
+        mean, logvar = self.encode.predict_on_batch([input_seq])
+        return mean, logvar
+
+    def decode_from_string(self, input_str, beam_width, delimiter=''):
+        input_seq = self.i_tokens.tokenize(input_str)
+        if self.p["bottleneck"] == "conv":
+            # Must pad with zeros
+            s = np.zeros(self.p["len_limit"])
+            s[0:len(input_str)] = input_seq
+            input_seq = s
+
+        # get mean & logvar
+        input_seq = np.expand_dims(input_seq, axis=0)
+        mean, logvar = self.encode.predict_on_batch([input_seq])
+        return self.decode_from_moments(mean, logvar, beam_width, delimiter)
+
+    def decode_from_moments(self, mean, logvar, beam_width, delimiter=''):
+        z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
+        return self.decode_from_sample(z, beam_width=beam_width, delimiter='')
+
+    def decode_from_sample(self, sample, beam_width, delimiter=''):
+        if beam_width == 1:
+            return self._decode_sequence_fast(z=sample, delimiter=delimiter)
+        else:
+            return self._beam_search(z=sample, topk=beam_width, delimiter=delimiter)
+
+    def decode_sequence(self, z, delimiter=''):
+        # First get the latent representation
+        target_seq = np.zeros((1, self.model.p["len_limit"]), dtype='int32')
+        target_seq[0, 0] = self.tokens.startid()
+
+        decoded_tokens = []
+
+        for i in range(self.model.p["len_limit"] - 1):
+            output = self.model.decode.predict_on_batch([z, target_seq])
+            sampled_index = np.argmax(output[0, i, :])
+            sampled_token = self.tokens.token(sampled_index)
+            decoded_tokens.append(sampled_token)
+            if sampled_index == self.tokens.endid(): break
+            target_seq[0, i + 1] = sampled_index
+        return delimiter.join(decoded_tokens[:-1])
+
+    def _decode_sequence_fast(self, z, delimiter=''):
+        '''
+        Greedy decodes a sequence by keeping the most probable output symbol at each stage
+        :param input_seq: String e.g. 'Cc1cccc1'
+        :param delimiter:
+        :return: output sequence as a string
+        '''
+        decoded_tokens = []
+        target_seq = np.zeros((1, self.p["len_limit"]), dtype='int32')
+        target_seq[0, 0] = self.o_tokens.startid()
+
+        for i in range(self.p["len_limit"] - 1):
+            output = self.decode.predict_on_batch([z, target_seq])
+            sampled_index = np.argmax(output[0, i, :])
+            sampled_token = self.o_tokens.token(sampled_index)
+            decoded_tokens.append(sampled_token)
+            if sampled_index == self.o_tokens.endid(): break
+            target_seq[0, i + 1] = sampled_index
+        return delimiter.join(decoded_tokens[:-1])
+
+    def _beam_search(self, z, topk=5, delimiter=''):
+        z = z.repeat(topk, 0)
+
+        final_results = []
+        decoded_tokens = [[] for _ in range(topk)]
+        decoded_logps = [0] * topk
+        lastk = 1
+        target_seq = np.zeros((topk, self.p["len_limit"]), dtype='int32')
+        target_seq[:, 0] = self.o_tokens.startid()
+
+        for i in range(self.p["len_limit"] - 1):
+            if lastk == 0 or len(final_results) > topk * 3: break
+
+            if self.p["decoder"] == "TRANSFORMER":
+                # Transformer requires most recent symbol
+                output = self.decode.predict_on_batch([z, target_seq])
+            else:
+                output = self.decode.predict_on_batch(z)
+
+            output = np.exp(output[:, i, :])
+            output = np.log(output / np.sum(output, -1, keepdims=True) + 1e-8)
+            cands = []
+            for k, wprobs in zip(range(lastk), output):
+                if target_seq[k, i] == self.o_tokens.endid(): continue
+                wsorted = sorted(list(enumerate(wprobs)), key=lambda x: x[-1], reverse=True)
+                for wid, wp in wsorted[:topk]:
+                    cands.append((k, wid, decoded_logps[k] + wp))
+            cands.sort(key=lambda x: x[-1], reverse=True)
+            cands = cands[:topk]
+            backup_seq = target_seq.copy()
+            for kk, zz in enumerate(cands):
+                k, wid, wprob = zz
+                target_seq[kk,] = backup_seq[k]
+                target_seq[kk, i + 1] = wid
+                decoded_logps[kk] = wprob
+                decoded_tokens.append(decoded_tokens[k] + [self.o_tokens.token(wid)])
+                if wid == self.o_tokens.endid(): final_results.append((decoded_tokens[k], wprob))
+            decoded_tokens = decoded_tokens[topk:]
+            lastk = len(cands)
+        final_results = [(x, y / (len(x) + 1)) for x, y in final_results]
+        final_results.sort(key=lambda x: x[-1], reverse=True)
+        final_results = [(delimiter.join(x), y) for x, y in final_results]
+        return final_results
+
+    def load_weights(self, weights_file):
+        for m in [self.encode, self.autoencoder, self.decode, self.encode_sample]:
+            m.load_weights(weights_file, by_name=True)
+
 
 class TransformerEncoder():
     def __init__(self, params, tokens, pos_emb, word_emb):
@@ -552,126 +642,3 @@ class TransformerEncoder():
             z_mean, z_logvar = self.encoder_to_latent(enc_output)
 
         return z_mean, z_logvar, z_s, enc_attn
-
-
-class SequenceInference():
-    def __init__(self, model, tokens, weights_file=None):
-        self.model = model
-        self.tokens = tokens
-        if weights_file:
-            self.model.autoencoder.load_weights(weights_file, by_name=True)
-            self.model.encode.load_weights(weights_file, by_name=True)
-            self.model.decode.load_weights(weights_file, by_name=True)
-
-        if model.p["model_arch"] == "TRANSFORMER" and model.p["bottleneck"] != "conv":
-            self.prepare_str = lambda x: self.tokens.tokenize(x)
-        else:
-            self.prepare_str = lambda x: self.tokens.onehotify(x, model.p["len_limit"])
-
-    def decode_sequence(self, input_seq, delimiter='', moments=None):
-        # First get the latent representation
-        target_seq = np.zeros((1, self.model.p["len_limit"]), dtype='int32')
-        target_seq[0, 0] = self.tokens.startid()
-
-        decoded_tokens = []
-        # If mean/variance not provided, calculate
-        if moments is None:
-            src_seq = self.prepare_str(input_seq)
-            [mean, logvar] = self.model.encode.predict_on_batch([src_seq, target_seq])
-        else:
-            mean, logvar = moments
-
-        # sample from moments
-        z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
-
-        for i in range(self.model.p["len_limit"] - 1):
-            output = self.model.decode.predict_on_batch([z, target_seq])
-            sampled_index = np.argmax(output[0, i, :])
-            sampled_token = self.tokens.token(sampled_index)
-            decoded_tokens.append(sampled_token)
-            if sampled_index == self.tokens.endid(): break
-            target_seq[0, i + 1] = sampled_index
-        return delimiter.join(decoded_tokens[:-1])
-
-    def decode_sequence_fast(self, input_seq, delimiter='', moments=None):
-        '''
-        Greedy decodes a sequence by keeping the most probable output symbol at each stage
-        :param input_seq: String e.g. 'Cc1cccc1'
-        :param delimiter:
-        :return: output sequence as a string
-        '''
-        decoded_tokens = []
-        target_seq = np.zeros((1, self.model.p["len_limit"]), dtype='int32')
-        target_seq[0, 0] = self.tokens.startid()
-
-        # If mean/variance not provided, calculate
-        if moments is None:
-            src_seq = self.prepare_str(input_seq)
-            [mean, logvar] = self.model.encode.predict_on_batch([src_seq, target_seq])
-        else:
-            mean, logvar = moments
-
-        # sample from moments
-        z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
-        for i in range(self.model.p["len_limit"] - 1):
-            output = self.model.decode.predict_on_batch([z, target_seq])
-            sampled_index = np.argmax(output[0, i, :])
-            sampled_token = self.tokens.token(sampled_index)
-            decoded_tokens.append(sampled_token)
-            if sampled_index == self.tokens.endid(): break
-            target_seq[0, i + 1] = sampled_index
-        return delimiter.join(decoded_tokens[:-1])
-
-    def beam_search(self, input_seq=None, topk=5, delimiter='', moments=None):
-        # If mean/variance not provided, calculate
-        if moments is None:
-            src_seq = self.prepare_str(input_seq)
-            [mean, logvar] = self.model.encode.predict_on_batch(src_seq)
-            z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
-        elif len(moments) == 2:
-            # have been provided mean and variance
-            mean, logvar = moments
-            z = mean + np.exp(logvar) * np.random.normal(0, 1, np.shape(mean))
-        else:
-            # have been provided z
-            z = np.reshape(moments[0], [1, len(moments[0])])
-
-        z = z.repeat(topk, 0)
-
-        final_results = []
-        decoded_tokens = [[] for _ in range(topk)]
-        decoded_logps = [0] * topk
-        lastk = 1
-        target_seq = np.zeros((topk, self.model.p["len_limit"]), dtype='int32')
-        target_seq[:, 0] = self.tokens.startid()
-
-        for i in range(self.model.p["len_limit"] - 1):
-            if lastk == 0 or len(final_results) > topk * 3: break
-            if self.model.p["model_arch"] == "TRANSFORMER":
-                output = self.model.decode.predict_on_batch([z, target_seq])
-            else:
-                output = self.model.decode.predict_on_batch(z)
-            output = np.exp(output[:, i, :])
-            output = np.log(output / np.sum(output, -1, keepdims=True) + 1e-8)
-            cands = []
-            for k, wprobs in zip(range(lastk), output):
-                if target_seq[k, i] == self.tokens.endid(): continue
-                wsorted = sorted(list(enumerate(wprobs)), key=lambda x: x[-1], reverse=True)
-                for wid, wp in wsorted[:topk]:
-                    cands.append((k, wid, decoded_logps[k] + wp))
-            cands.sort(key=lambda x: x[-1], reverse=True)
-            cands = cands[:topk]
-            backup_seq = target_seq.copy()
-            for kk, zz in enumerate(cands):
-                k, wid, wprob = zz
-                target_seq[kk,] = backup_seq[k]
-                target_seq[kk, i + 1] = wid
-                decoded_logps[kk] = wprob
-                decoded_tokens.append(decoded_tokens[k] + [self.tokens.token(wid)])
-                if wid == self.tokens.endid(): final_results.append((decoded_tokens[k], wprob))
-            decoded_tokens = decoded_tokens[topk:]
-            lastk = len(cands)
-        final_results = [(x, y / (len(x) + 1)) for x, y in final_results]
-        final_results.sort(key=lambda x: x[-1], reverse=True)
-        final_results = [(delimiter.join(x), y) for x, y in final_results]
-        return final_results

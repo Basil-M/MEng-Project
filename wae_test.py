@@ -39,7 +39,7 @@ def main():
 
     params = utils.AttnParams()
     params["epochs"] = 15
-    params["model_arch"] = "TRANSFORMER"
+    params["decoder"] = "TRANSFORMER"
     params["layers"] = 1
     params["d_model"] = 3
     params["d_inner_hid"] = 4

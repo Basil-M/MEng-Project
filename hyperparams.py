@@ -9,7 +9,6 @@ from hyperopt import Trials, STATUS_OK, tpe
 
 import utils
 from model_analysis import property_distributions as PD
-from molecules.model import SequenceInference
 from train import trainTransformer
 
 MODEL_ARCH = 'TRANSFORMER'
@@ -89,14 +88,13 @@ def create_model(x_train, y_train, x_test, y_test):
 
     # get the highest validation accuracy of the training epochs
     validation_acc = np.amax(result.history['val_acc'])
-    SeqInfer = SequenceInference(model, tokens)
     output = PD(x_train[0], x_train[-1],
                 num_seeds=200,
                 num_decodings=3,
-                SeqInfer=SeqInfer,
+                model=model,
                 beam_width=5)
 
-    frac_valid = output["num_valid"]/output["num_mols"]
+    frac_valid = output["num_valid"] / output["num_mols"]
     print("With params:")
     params.dump()
     print("Validation acc:", validation_acc, "Fraction valid:", frac_valid)
