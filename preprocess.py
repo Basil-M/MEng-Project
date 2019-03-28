@@ -63,20 +63,17 @@ def main():
         print("Generating prefix tree of canonicalised chemicals")
         print("May take a while...")
         num_mols = len(data[args.smiles_column])
-        canon_structs = pygtrie.StringTrie()
+        canon_struct_tree = pygtrie.StringTrie()
         for idx in progressbar.progressbar(range(num_mols)):
             mol = Chem.MolFromSmiles(''.join(data[args.smiles_column][idx]))
             if mol:
                 canon_name = Chem.MolToSmiles(mol)
-                canon_structs[canon_name] = canon_name
+                canon_struct_tree[canon_name] = canon_name
 
         with open(pkl_file, mode='wb') as f:
-            pickle.dump(canon_structs, f, pickle.HIGHEST_PROTOCOL)
-    else:
-        print("Loading prefix tree of canonicalised chemicals")
-        with open(pkl_file, mode='rb') as f:
-            canon_structs = pickle.load(f)
-
+            pickle.dump(canon_struct_tree, f, pickle.HIGHEST_PROTOCOL)
+        del canon_struct_tree
+ 
     keys = data[args.smiles_column].map(len) < args.max_len + 1
     if args.length <= len(keys):
         data = data[keys].sample(n=args.length)
@@ -116,16 +113,24 @@ def main():
         charset = list(reduce(lambda x, y: set(y) | x, structures, set()))
     # Explicitly encode so it can be saved in h5 file
     # PREPROCESSING FOR TRANSFORMER MODEL
-    print("Canonicalising strings")
+    print("Fetching", args.length, "canonicalised strings from dataset")
     bar_i = 0
     widgets = [' [', progressbar.Timer(), '] ', progressbar.Bar(), ' (', progressbar.ETA(), ') ', ]
+    # convert prefix tree to list so it can be indexed by id
     with progressbar.ProgressBar(maxval=args.length, widgets=widgets) as bar:
         train_str = []
         test_str = []
         for (idx, lst) in zip([train_idx, test_idx], [train_str, test_str]):
             # canonicalise
-            for id in idx:
-                lst.append(canon_structs[id])
+            for (i, id) in enumerate(idx):
+                mol = ''.join(structures[id])
+                rd_mol = Chem.MolFromSmiles(mol)
+                if rd_mol:
+                    lst.append(Chem.MolToSmiles(rd_mol))
+                else:
+                    print("Could not canonicalise molecule", i)
+                    lst.append(mol)
+
                 bar_i += 1
                 bar.update(bar_i)
     # Split testing and training data
