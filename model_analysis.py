@@ -138,16 +138,13 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, mode
         for seq in data_test:
             # get mean/variance
             mu, logvar = model.get_moments(seq)
-
             for dec_itr in range(num_decodings):
                 # c_output = output(mu,logvar)
                 s = model.decode_from_moments(mu, logvar, beam_width)
                 s = np.array(s)
                 if s.ndim > 1: s = s[:, 0]
-
                 success = False  # Track whether we produced a valid molecule from this seed
-
-                for mol in s:
+                for (i, mol) in enumerate(s):
                     rd_mol = Chem.MolFromSmiles(mol)
                     if rd_mol:
                         success = True
@@ -164,12 +161,13 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, mode
                             except:
                                 pass
                 #                                print("Could not calculate properties for {}".format(mol))
-                if success: successful_seeds += 1
+                if success:
+                    successful_seeds += 1
                 bar_i += 1
                 bar.update(bar_i)
-
+    print("Using seeded sampling:")
+    print("From {} seeds with {} decodings each, had {} successful decodings.".format(num_seeds,num_decodings, successful_seeds))
     print("Generated {} unique sequences, of which {} were valid.".format(len(output_molecules), len(gen_props)))
-
     if latents_file:
         import matplotlib.pyplot as plt
         import seaborn as sns
@@ -191,7 +189,7 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, mode
               "output_mols": output_molecules,
               "num_valid": num_valid,
               "num_mols": len(output_molecules),
-              "success_frac": successful_seeds / num_seeds,
+              "success_frac": successful_seeds / (num_decodings*num_seeds),
               "yield": num_valid / num_seeds}
 
     if data_file:
@@ -233,7 +231,7 @@ def rand_mols(nseeds, latent_dim, model: TriTransformer, beam_width=1, data_file
         ' (', progressbar.ETA(), ') ',
     ]
 
-    with progressbar.ProgressBar(maxval=nseeds, widgets=widgets, redirect_stdout=True) as bar:
+    with progressbar.ProgressBar(maxval=nseeds, widgets=widgets) as bar:
         for bar_i in range(nseeds):
             z_i = np.random.randn(latent_dim)
             s = model.decode_from_sample(z_i, beam_width=beam_width)
@@ -262,7 +260,7 @@ def rand_mols(nseeds, latent_dim, model: TriTransformer, beam_width=1, data_file
                             # print("Could not calculate properties for {}".format(mol))  # bar.update(bar_i)
             if success: successful_seeds += 1
             bar.update(bar_i)
-
+    print("From {} seeds, had {} successful decodings.".format(nseeds, successful_seeds))
     print("Generated {} unique sequences, of which {} were valid.".format(len(output_molecules), len(gen_props)))
     output = {"gen_props": np.array(gen_props),
               "output_mols": output_molecules,
