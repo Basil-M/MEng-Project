@@ -39,6 +39,7 @@ set_session(Session(config=config))
 mnames = {"average1": "AVG1",
           "average2": "AVG2",
           "average3": "AVG3",
+          "average4": "AVGmh",
           "ar1": "AR1",
           "ar2": "AR2",
           "ar_log": "ARlog",
@@ -49,8 +50,6 @@ mnames = {"average1": "AVG1",
 
 
 def get_arguments():
-    default = utils.AttnParams()
-
     parser = argparse.ArgumentParser(description='Molecular autoencoder network')
     parser.add_argument('--data', type=str, help='The HDF5 file containing preprocessed data.',
                         default=DATA)
@@ -63,7 +62,7 @@ def get_arguments():
                         help='Number of epochs to run during training.')
     parser.add_argument('--batch_size', type=int, metavar='N', default=40,
                         help='Number of samples to process per minibatch during training.')
-    parser.add_argument('--bottleneck', type=str, metavar='N', default="average1",
+    parser.add_argument('--bottleneck', type=str, metavar='N', default="average4",
                         help='Choice of bottleneck')
     parser.add_argument('--model_size', type=str, metavar='N', default="small",
                         help='Number of samples to process per minibatch during training.')

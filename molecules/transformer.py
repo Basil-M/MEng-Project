@@ -296,7 +296,7 @@ class SumLatent2():
         self.attn_mechanism = KQV_Attn(d_in=d_model, d_out=latent_dim, activation='linear', use_softmax=False)
         self.after_avg = Dense(latent_dim, input_shape=(latent_dim,), activation='relu')
         self.mean_layer = Dense(latent_dim, input_shape=(latent_dim,), name='mean_layer')
-        self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer')
+        self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer', activation='sigmoid')
 
     def __call__(self, encoder_output):
         # encoder output should be [batch size, length, d_model]
@@ -306,14 +306,19 @@ class SumLatent2():
 
 
 class KQV_Attn():
-    def __init__(self, d_in, d_out, activation='linear', use_softmax=True):
+    def __init__(self, d_in, d_out, activation='linear', use_softmax=True, scale_key=False):
         self.keys = TimeDistributed(Dense(d_out, input_shape=(d_in,), activation=activation))
         self.queries = TimeDistributed(Dense(d_out, input_shape=(d_out,), activation=activation))
         self.values = TimeDistributed(Dense(d_out, input_shape=(d_out,), activation=activation))
         self.softmax = use_softmax
+        self.scale_key = scale_key
+        self.d = d_in
 
     def __call__(self, x):
         key = self.keys(x)
+        if self.scale_key:
+            key /= np.sqrt(self.d)
+
         query = self.queries(x)
         value = self.values(x)
         attn = Lambda(lambda x: tf.matrix_diag_part(K.batch_dot(x[0], x[1], axes=2)))([key, query])
@@ -335,6 +340,22 @@ class AvgLatent2():
     def __call__(self, encoder_output):
         # encoder output should be [batch size, length, d_model]
         h = self.attn_mechanism(encoder_output)
+        h = self.after_avg(h)
+        return self.mean_layer(h), self.logvar_layer(h)
+
+
+class AvgLatent4():
+    def __init__(self, d_model, latent_dim, heads=4):
+        d_kqv = int(np.ceil(d_model / heads))
+        self.attns = [KQV_Attn(d_model, d_kqv, activation='relu') for _ in range(heads)]
+        self.after_avg = Dense(latent_dim, input_shape=(d_kqv * heads,), activation='relu')
+        self.mean_layer = Dense(latent_dim, input_shape=(latent_dim,), name='mean_layer')
+        self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer')
+
+    def __call__(self, encoder_output):
+        # encoder output should be [batch size, length, d_model]
+        h = [layer(encoder_output) for layer in self.attns]
+        h = Concatenate(axis=-1)(h)
         h = self.after_avg(h)
         return self.mean_layer(h), self.logvar_layer(h)
 
@@ -1386,6 +1407,7 @@ add_layer = Lambda(lambda x: x[0] + x[1], output_shape=lambda x: x[0])
 latent_dict = {"average1": AvgLatent,
                "average2": AvgLatent2,
                "average3": AvgLatent3,
+               "average4": AvgLatent4,
                "sum1": SumLatent,
                "sum2": SumLatent2,
                "ar1": InterimDecoder,
