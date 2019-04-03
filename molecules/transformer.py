@@ -296,13 +296,14 @@ class SumLatent2():
         self.attn_mechanism = KQV_Attn(d_in=d_model, d_out=latent_dim, activation='linear', use_softmax=False)
         self.after_avg = Dense(latent_dim, input_shape=(latent_dim,), activation='relu')
         self.mean_layer = Dense(latent_dim, input_shape=(latent_dim,), name='mean_layer')
+        self.logvar_layer1 = Dense(latent_dim, input_shape=(latent_dim,), activation='tanh', name='logvar_layer_tanh')
         self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer')
-
     def __call__(self, encoder_output):
         # encoder output should be [batch size, length, d_model]
         h = self.attn_mechanism(encoder_output)
         h = self.after_avg(h)
-        return self.mean_layer(h), self.logvar_layer(h)
+        h_l = self.logvar_layer1(h)
+        return self.mean_layer(h), self.logvar_layer(h_l)
 
 
 class KQV_Attn():

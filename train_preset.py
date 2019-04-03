@@ -16,7 +16,7 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 K.tensorflow_backend.set_session(tf.Session(config=config))
 
-NUM_EPOCHS = 20
+NUM_EPOCHS = 30
 BATCH_SIZE = 50
 LATENT_DIM = 128
 RANDOM_SEED = 1403
@@ -39,6 +39,8 @@ set_session(Session(config=config))
 mnames = {"average1": "AVG1",
           "average2": "AVG2",
           "average3": "AVG3",
+          "sum1":"SUM1",
+          "sum2":"SUM2",
           "ar1": "AR1",
           "ar2": "AR2",
           "ar_log": "ARlog",
@@ -71,180 +73,188 @@ def get_arguments():
                         help='Latent dimension')
     parser.add_argument('--use_WAE', type=bool, metavar='N', default=False,
                         help="Choice to use Normal IMQ WAE with s = 2, weight = 10")
+    parser.add_argument('--model_folder', type=str, metavar='N', default=None,
+                        help="Specify model folder. If specified, all other options are ignored.")
     return parser.parse_args()
-
 
 def main():
     args = get_arguments()
     np.random.seed(1380)
-    model_name = "{}_{}_d{}_{}".format(mnames[args.bottleneck], args.model_size, args.latent_dim,
+    if args.model_folder:
+        model_dir = args.model_folder
+        params = utils.AttnParams()
+        params.load(model_dir + "/params.pkl")
+        model_name = params["model"]
+    else:
+        model_name = "{}_{}_d{}_{}".format(mnames[args.bottleneck], args.model_size, args.latent_dim,
                                        "WAE" if args.use_WAE else "VAE")
-    model_dir = args.models_dir + model_name + "/"
-    if not os.path.exists(model_dir):
-        os.mkdir(model_dir)
+        model_dir = args.models_dir + model_name + "/"
+        if not os.path.exists(model_dir):
+            os.mkdir(model_dir)
     # Get default attention parameters
-    params = utils.AttnParams()
+        params = utils.AttnParams()
 
     # Standard training params
-    params["epochs"] = 1  # args.epochs
-    params["batch_size"] = args.batch_size
-    params["kl_pretrain_epochs"] = 0
-    params["kl_anneal_epochs"] = 0
-    params["bottleneck"] = args.bottleneck
-    params["stddev"] = 1
-    params["decoder"] = "TRANSFORMER"
-    params["latent_dim"] = args.latent_dim
-    params["model"] = model_name
+        params["epochs"] =  args.epochs
+        params["batch_size"] = args.batch_size
+        params["kl_pretrain_epochs"] = 2
+        params["kl_anneal_epochs"] = 5
+        params["bottleneck"] = args.bottleneck
+        params["stddev"] = 1
+        params["decoder"] = "TRANSFORMER"
+        params["latent_dim"] = args.latent_dim
+        params["model"] = model_name
     # Get training and test data from data file
     # Set up model
-    if args.model_size == "small":
-        # AVG1:     47741
-        # AVG2:     53216
-        # GRU:      51076
-        # GRU_ATTN: 50806
-        # CONV:     51629
-        # AR_SLIM:  58394
+    if not args.model_folder:
+        if args.model_size == "small":
+                # AVG1:     47741
+                # AVG2:     53216
+                # GRU:      51076
+                # GRU_ATTN: 50806
+                # CONV:     51629
+                # AR_SLIM:  58394
 
-        params["d_model"] = 32
-        params["d_inner_hid"] = 196
-        params["d_k"] = 6
-        params["heads"] = 6
-        params["layers"] = 2
-        if params["bottleneck"] == "ar_slim":
-            params["ID_layers"] = 3
-            params["ID_d_model"] = 6
-            params["ID_width"] = 6
-            params["ID_d_inner_hid"] = 30
-            params["ID_d_k"] = 4
-            params["ID_d_v"] = 4
-            params["ID_heads"] = 5
-        elif "ar" in params["bottleneck"]:
-            params["ID_layers"] = 2
-            params["ID_d_model"] = 8
-            params["ID_d_inner_hid"] = 64
-            params["ID_width"] = 4
-            params["ID_d_k"] = 6
-            params["ID_d_v"] = 6
-            params["ID_heads"] = 4
-        elif params["bottleneck"] == "gru":
-            params["ID_layers"] = 3
-            params["ID_d_model"] = 48
-        elif params["bottleneck"] == "gru_attn":
-            params["ID_layers"] = 3
-            params["ID_d_model"] = 42
+            params["d_model"] = 32
+            params["d_inner_hid"] = 196
+            params["d_k"] = 6
+            params["heads"] = 6
+            params["layers"] = 2
+            if params["bottleneck"] == "ar_slim":
+                params["ID_layers"] = 3
+                params["ID_d_model"] = 6
+                params["ID_width"] = 6
+                params["ID_d_inner_hid"] = 30
+                params["ID_d_k"] = 4
+                params["ID_d_v"] = 4
+                params["ID_heads"] = 5
+            elif "ar" in params["bottleneck"]:
+                params["ID_layers"] = 2
+                params["ID_d_model"] = 8
+                params["ID_d_inner_hid"] = 64
+                params["ID_width"] = 4
+                params["ID_d_k"] = 6
+                params["ID_d_v"] = 6
+                params["ID_heads"] = 4
+            elif params["bottleneck"] == "gru":
+                params["ID_layers"] = 3
+                params["ID_d_model"] = 48
+            elif params["bottleneck"] == "gru_attn":
+                params["ID_layers"] = 3
+                params["ID_d_model"] = 42
+            elif params["bottleneck"] == "conv":
+                params["ID_layers"] = 2  # num layers
+                params["ID_d_k"] = 5  # min_filt_size/num
+                params["ID_d_model"] = 64  # dense dim
+
+        elif args.model_size == "medium":
+            # AVG1:     171413
+            # AVG2:     174488
+            # GRU:      172664
+            # GRU_ATTN: 171308
+            # CONV:     171800
+            # AR_SLIM:  184968
+            params["d_model"] = 64
+            params["d_inner_hid"] = 256
+            params["d_k"] = 8
+            params["heads"] = 8
+            params["layers"] = 3
+
+            if params["bottleneck"] == "ar_slim":
+                params["ID_layers"] = 4
+                params["ID_d_model"] = 8
+                params["ID_width"] = 6
+                params["ID_d_inner_hid"] = 64
+                params["ID_d_k"] = 4
+                params["ID_d_v"] = 4
+                params["ID_heads"] = 4
+            elif "ar" in params["bottleneck"]:
+                params["ID_layers"] = 2
+                params["ID_d_model"] = 32
+                params["ID_width"] = 4
+                params["ID_d_inner_hid"] = 196
+                params["ID_d_k"] = 7
+                params["ID_d_v"] = 7
+                params["ID_heads"] = 5
+            elif params["bottleneck"] == "gru_attn":
+                params["ID_layers"] = 4
+                params["ID_d_model"] = 78
+            elif params["bottleneck"] == "gru":
+                params["ID_layers"] = 4
+                params["ID_d_model"] = 82
+            elif params["bottleneck"] == "conv":
+                params["ID_layers"] = 4
+                params["ID_d_k"] = 8
+                params["ID_d_model"] = 156
+
+        elif args.model_size == "big" or args.model_size == "large":
+            # big avg:      1,131,745
+            # big ar_log:   1,316,449
+            # big GRU:      1,029,152
+            # big CONV:     439,419
+            params["d_model"] = 128
+            params["d_inner_hid"] = 768
+            params["d_k"] = 12
+            params["heads"] = 12
+            params["layers"] = 4
+
+            if "ar" in params["bottleneck"]:
+                params["ID_layers"] = 3
+                params["ID_d_model"] = 40
+                params["ID_width"] = 4
+                params["ID_d_inner_hid"] = 256
+                params["ID_d_k"] = 8
+                params["ID_d_v"] = 8
+                params["ID_heads"] = 6
+            elif "gru" in params["bottleneck"]:
+                params["ID_layers"] = 5
+                params["ID_d_model"] = 160
         elif params["bottleneck"] == "conv":
-            params["ID_layers"] = 2  # num layers
-            params["ID_d_k"] = 5  # min_filt_size/num
-            params["ID_d_model"] = 64  # dense dim
+                params["ID_layers"] = 4
+                params["ID_d_k"] = 9
+                params["ID_d_model"] = 512
+        
+        params["d_v"] = params["d_k"]
 
-    elif args.model_size == "medium":
-        # AVG1:     171413
-        # AVG2:     174488
-        # GRU:      172664
-        # GRU_ATTN: 171308
-        # CONV:     171800
-        # AR_SLIM:  184968
-        params["d_model"] = 64
-        params["d_inner_hid"] = 256
-        params["d_k"] = 8
-        params["heads"] = 8
-        params["layers"] = 3
+        if args.use_WAE:
+            params["WAE_kernel"] = "IMQ_normal"
+            params["kl_max_weight"] = 10
+            params["WAE_s"] = 2
 
-        if params["bottleneck"] == "ar_slim":
-            params["ID_layers"] = 4
-            params["ID_d_model"] = 8
-            params["ID_width"] = 6
-            params["ID_d_inner_hid"] = 64
-            params["ID_d_k"] = 4
-            params["ID_d_v"] = 4
-            params["ID_heads"] = 4
-        elif "ar" in params["bottleneck"]:
-            params["ID_layers"] = 2
-            params["ID_d_model"] = 32
-            params["ID_width"] = 4
-            params["ID_d_inner_hid"] = 196
-            params["ID_d_k"] = 7
-            params["ID_d_v"] = 7
-            params["ID_heads"] = 5
-        elif params["bottleneck"] == "gru_attn":
-            params["ID_layers"] = 4
-            params["ID_d_model"] = 78
-        elif params["bottleneck"] == "gru":
-            params["ID_layers"] = 4
-            params["ID_d_model"] = 82
-        elif params["bottleneck"] == "conv":
-            params["ID_layers"] = 4
-            params["ID_d_k"] = 8
-            params["ID_d_model"] = 156
+        # Handle interim decoder parameters
+        params.setIDparams()
 
-    elif args.model_size == "big":
-        # big avg:      1,131,745
-        # big ar_log:   1,316,449
-        # big GRU:      1,029,152
-        # big CONV:     439,419
-        params["d_model"] = 128
-        params["d_inner_hid"] = 768
-        params["d_k"] = 12
-        params["heads"] = 12
-        params["layers"] = 4
+        # Create model tracking folder
+        if not exists(model_dir):
+            mkdir(model_dir)
 
-        if "ar" in params["bottleneck"]:
-            params["ID_layers"] = 3
-            params["ID_d_model"] = 40
-            params["ID_width"] = 4
-            params["ID_d_inner_hid"] = 256
-            params["ID_d_k"] = 8
-            params["ID_d_v"] = 8
-            params["ID_heads"] = 6
-        elif "gru" in params["bottleneck"]:
-            params["ID_layers"] = 5
-            params["ID_d_model"] = 160
-        elif params["bottleneck"] == "conv":
-            params["ID_layers"] = 6
-            params["ID_d_k"] = 10
-            params["ID_d_model"] = 512
+        # Handle parameters
+        param_filename = model_dir + "params.pkl"
+        loaded_params = utils.AttnParams()
 
-    params["d_v"] = params["d_k"]
+        if not exists(param_filename):
+            print("Starting new model {} with params:".format(model_name))
+            params.dump()
+            params.save(param_filename)
+        else:
+            loaded_params.load(param_filename)
+            print("Found model also named {} trained for {} epochs with params:".format(model_name,
+                                                                                        loaded_params["current_epoch"]))
+            loaded_params.dump()
+            # Allow for increasing number of epochs of pre-trained model
+            if params["epochs"] > loaded_params["epochs"]:
+                print(
+                    "Number of epochs increased to {} from {}. Autoencoder will be trained more.".format(
+                        params["epochs"], loaded_params["epochs"]))
+                loaded_params["epochs"] = params["epochs"]
 
-    if args.use_WAE:
-        params["WAE_kernel"] = "IMQ_normal"
-        params["kl_max_weight"] = 10
-        params["WAE_s"] = 2
-
-    # Handle interim decoder parameters
-    params.setIDparams()
-
-    # Create model tracking folder
-    if not exists(model_dir):
-        mkdir(model_dir)
-
-    # Handle parameters
-    param_filename = model_dir + "params.pkl"
-    loaded_params = utils.AttnParams()
-
-    if not exists(param_filename):
-        print("Starting new model {} with params:".format(model_name))
-        params.dump()
-        params.save(param_filename)
-    else:
-        loaded_params.load(param_filename)
-        print("Found model also named {} trained for {} epochs with params:".format(model_name,
-                                                                                    loaded_params["current_epoch"]))
-        loaded_params.dump()
-        # Allow for increasing number of epochs of pre-trained model
-        if params["epochs"] > loaded_params["epochs"]:
-            print(
-                "Number of epochs increased to {} from {}. Autoencoder will be trained more.".format(
-                    params["epochs"], loaded_params["epochs"]))
-            loaded_params["epochs"] = params["epochs"]
-
-        params = loaded_params
+            params = loaded_params
 
     model, results = trainTransformer(params=params, data_file=args.data,
                                       model_dir=model_dir)
 
     data_train, data_test, _, _, tokens = utils.load_dataset(args.data,
-                                                             "onehot" if args.bottleneck == "conv" else "cat",
+                                                             "cat",
                                                              params["pp_weight"])
     props_train, props_test, prop_labels = utils.load_properties(args.data)
 
@@ -252,7 +262,7 @@ def main():
     num_decodings = 3
     num_prior_samples = 1000
     with supress_stderr():
-        seed_output = property_distributions(data_test[0], props_test,
+        seed_output = property_distributions(data_test, props_test,
                                              num_seeds=num_seeds,
                                              num_decodings=num_decodings,
                                              model=model,
@@ -260,14 +270,14 @@ def main():
         rand_output = rand_mols(num_prior_samples, params["latent_dim"], model, 5 , data_file='data/zinc12.h5')
 
     # SAVE DATA
-    val_acc = getBestValAcc(args.models_dir + "/runs.csv", model_name=model_name)
+    val_acc = getBestValAcc(args.models_dir + "/runs.csv", params)
     createResultsFile(args.models_dir)
     saveResults(params, val_acc, seed_output, rand_output, num_seeds, num_decodings, num_prior_samples,
                 models_dir=args.models_dir)
     print("\tValidation accuracy:\t {:.2f}".format(val_acc))
     # TODO(Basil): Add getting results from CSV file...
 
-    for (mode, output) in zip(["SAMPLING PRIOR", "SAMPLING WITH SEEDS"], [seed_output, rand_output]):
+    for (mode, output) in zip(["SAMPLING PRIOR", "SAMPLING WITH SEEDS"], [rand_output, seed_output]):
         print("BY", mode)
 
         print("\tGenerated {} molecules, of which {} were valid and {} were novel.".format(output["num_mols"],
@@ -290,14 +300,16 @@ def main():
                 print("\t\t\tGenerated distribution:\t {:.2f} ± {:.2f}".format(np.mean(gen_dat), np.std(gen_dat)))
 
 
-def getBestValAcc(csv_dir, model_name):
+def getBestValAcc(csv_dir, params):
     arr = np.genfromtxt(csv_dir, delimiter=",", dtype=str)
     # pad column if necessary
-    num_params = len(utils.AttnParams())
+    model_name = params["model"]
+    num_params = len(params)
     rownum = np.where(arr[:, 0] == model_name)[0][0]
     arr = arr[rownum, :]
     arr = np.array(arr)
     arr = arr[num_params:]
+    ns = params["kl_pretrain_epochs"] + params["kl_anneal_epochs"]
     arr = arr[range(1, len(arr), 2)]
 
     def isnum(n):
@@ -308,6 +320,7 @@ def getBestValAcc(csv_dir, model_name):
             return False
 
     arr = np.array([a for a in arr if isnum(a)], dtype=float)
+    arr = arr[ns+1:]
     return np.max(arr)
 
 
