@@ -301,9 +301,9 @@ class TriTransformer:
         self.decode = Model([z_input, tgt_seq_in], final_output[0])
 
     def _buildPropertyPredictor(self, x):
-        h = Dense(self.p["latent_dim"], input_shape=(self.p["latent_dim"],), activation='relu')(x)
+        h = Dense(100, input_shape=(self.p["latent_dim"],), activation='relu')(x)
         for _ in range(self.p["pp_layers"] - 1):
-            h = Dense(self.p["pp_layers"], activation='relu')(h)
+            h = Dense(100, activation='relu')(h)
         return Dense(self.p["num_props"], activation='linear', name='props')(h)
 
     def compile_vae(self, optimizer='adam', N_GPUS=1):

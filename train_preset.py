@@ -258,8 +258,8 @@ def main():
                                                              params["pp_weight"])
     props_train, props_test, prop_labels = utils.load_properties(args.data)
 
-    num_seeds = 1000
-    num_decodings = 3
+    num_seeds = 500
+    num_decodings = 10
     num_prior_samples = 1000
     with supress_stderr():
         seed_output = property_distributions(data_test, props_test,
@@ -337,6 +337,7 @@ def createResultsFile(models_dir):
         d = ["Model name",
              "Epochs",
              "Val_acc",
+             "Epoch_time",
              "S: Num seeds",
              "S: Num decodings"]
         append_titles(d)
@@ -359,7 +360,7 @@ def saveResults(params, val_acc, seeded_output, prior_output, num_seeds, num_dec
             d.append(np.round(np.mean(output["gen_props"][:, i]), 3))
             d.append(np.round(np.std(output["gen_props"][:, i]), 3))
 
-    d = [params["model"], params["epochs"], val_acc, num_seeds, num_decodings]
+    d = [params["model"], params["epochs"], val_acc, params["epoch_time"], num_seeds, num_decodings]
     append_output(seeded_output, d)
     d.append(num_prior_samples)
     append_output(prior_output, d)

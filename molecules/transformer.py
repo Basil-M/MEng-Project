@@ -349,7 +349,7 @@ class AvgLatent2():
 class AvgLatent4():
     def __init__(self, d_model, latent_dim, heads=4):
         d_kqv = int(np.ceil(d_model / heads))
-        self.attns = [KQV_Attn(d_model, d_kqv, activation='relu') for _ in range(heads)]
+        self.attns = [KQV_Attn(d_model, d_kqv, activation='linear') for _ in range(heads)]
         self.after_avg = Dense(latent_dim, input_shape=(d_kqv * heads,), activation='relu')
         self.mean_layer = Dense(latent_dim, input_shape=(latent_dim,), name='mean_layer')
         self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer')
@@ -1175,13 +1175,14 @@ class InterimDecoder5():
 
 
 class FalseEmbeddingsTD():
-    def __init__(self, d_emb, residual=True, layers=0):
+    def __init__(self, d_emb, d_latent=None, residual=True, layers=1):
         '''
         Given a 1D vector, attempts to create 'false' embeddings to
         go from latent space
         :param d_emb: dimensionality of false embeddings
         '''
-
+        self.l1 = Dense(d_latent, input_shape=(d_latent,), activation='relu')
+        self.l2 = Dense(d_latent, input_shape=(d_latent,))
         self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,)))
         self.deep_layers = [TimeDistributed(Dense(d_emb, activation='relu', input_shape=(d_emb,))) for _ in
                             range(layers)]
@@ -1198,7 +1199,8 @@ class FalseEmbeddingsTD():
         :param z: Input with dimensionality [batch_size, d] or [batch_size, d, 1]
         :return: Falsely embedded output with dimensionality [batch_size, d, d_emb]
         '''
-
+        z = self.l1(z)
+        z = self.l2(z)
         if z.shape.ndims == 2:
             z = Lambda(lambda x: K.expand_dims(x, axis=2))(z)
 
@@ -1209,12 +1211,9 @@ class FalseEmbeddingsTD():
             if self.residual:
                 z_w = self.deep_res_layers[i](layer(z))
                 z = Add()([z, z_w])
-                z = TimeDistributed(BatchNormalization)(z)
-                z = ReLU()(z)
                 # z = z + layer(z)
             else:
                 z = layer(z)
-                z = TimeDistributed(BatchNormalization)(z)
 
         return self.final_lin(z)
 

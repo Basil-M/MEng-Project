@@ -140,7 +140,7 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, mode
             mu, logvar = model.get_moments(seq)
             for dec_itr in range(num_decodings):
                 # c_output = output(mu,logvar)
-                s = model.decode_from_moments(mu, logvar, beam_width)
+                s = model.decode_from_moments(mu, np.log(0.1)*np.ones_like(logvar), beam_width)
                 s = np.array(s)
                 if s.ndim > 1: s = s[:, 0]
                 success = False  # Track whether we produced a valid molecule from this seed

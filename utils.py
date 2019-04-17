@@ -2,7 +2,7 @@
 import os
 import pickle
 from os.path import dirname
-
+import time
 import h5py
 import numpy as np
 from keras import backend as K
@@ -48,7 +48,12 @@ class epoch_track(Callback):
         else:
             self.csv_filename = None
 
+    def on_epoch_begin(self, batch, logs={}):
+        self.epoch_time = time.time()
+
     def on_epoch_end(self, epoch, logs={}):
+        self.epoch_time = time.time() - self.epoch_time
+        self._params["epoch_time"] = (self._params["epoch_time"]*epoch + self.epoch_time)/(epoch+1)
         self._params["current_epoch"] += 1
         self._params.save(self._filename)
         epoch += 1
@@ -70,7 +75,7 @@ class epoch_track(Callback):
             arr[self.rownum, num_params + 2 * epoch - 1] = logs["val_acc"]
             # save csv
             np.savetxt(self.csv_filename, arr, delimiter=",", fmt='%s')
-
+        self.epoch_time = time.time()
         return
 
     def on_train_end(self, logs={}):
@@ -385,7 +390,8 @@ class AttnParams:
             "ID_d_v": None,
             "ID_layers": None,
             "ID_width": None,
-            "num_params": None
+            "num_params": None,
+            "epoch_time": 0,
         }
 
     def __getitem__(self, param):
