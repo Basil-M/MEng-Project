@@ -156,9 +156,16 @@ class TriTransformer:
 
         self.false_embedder = tr.FalseEmbeddings(d_emb=self.p["d_model"], d_latent=self.p["latent_dim"])
 
-        self.decoder = tr.DecoderFromLatent(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"], self.p["d_k"],
-                                            self.p["d_v"], self.p["layers"], self.p["dropout"],
-                                            word_emb=dec_word_emb, pos_emb=dec_pos_emb)
+        self.use_FILM = True
+        if self.use_FILM:
+            self.decoder = tr.DecoderWithFILM(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"],
+                                              self.p["d_k"], self.p["d_v"], self.p["latent_dim"], self.p["layers"],
+                                              self.p["dropout"], word_emb=dec_word_emb, pos_emb=dec_pos_emb)
+        else:
+            self.decoder = tr.TransformerDecoder(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"],
+                                                 self.p["d_k"],
+                                                 self.p["d_v"], self.p["layers"], self.p["dropout"],
+                                                 word_emb=dec_word_emb, pos_emb=dec_pos_emb)
         self.p = params
         self.target_layer = TimeDistributed(Dense(self.o_tokens.num(), use_bias=False))
 
@@ -206,12 +213,12 @@ class TriTransformer:
         for l_vec in [z_input, z_sampled]:
             # 'false embed' for decoder
             dec_input = self.false_embedder(l_vec)
-            dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq,
-                                                             tgt_pos,
-                                                             l_vec,
-                                                             dec_input,
-                                                             active_layers=active_layers,
-                                                             return_att=True)
+            if self.use_FILM:
+                dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq, tgt_pos, l_vec, dec_input, l_vec,
+                                                                 active_layers=active_layers, return_att=True)
+            else:
+                dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq, tgt_pos, l_vec, dec_input,
+                                                                 active_layers=active_layers, return_att=True)
 
             dec_output = debugPrint(dec_output, "DEC_OUTPUT")
             # Do not perform softmax on output

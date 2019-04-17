@@ -1301,19 +1301,12 @@ class FalseEmbeddings():
         return z
 
 
-class DecoderFromLatent():
+class TransformerDecoder():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
                  layers=6, dropout=0.1, word_emb=None, pos_emb=None):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
-
-        def print_shape(arg):
-            s = K.shape(arg)
-            s = K.print_tensor(s, "SHAPE OF {}: ".format(arg.name))
-            return K.reshape(arg, s)
-
-        self.pr = Lambda(print_shape)
 
     def __call__(self, tgt_seq, tgt_pos, src_seq, enc_output, return_att=False, active_layers=999):
 
@@ -1341,34 +1334,76 @@ class DecoderFromLatent():
         return (x, self_atts, enc_atts) if return_att else x
 
 
-class Decoder():
-    def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v,
+class FiLM():
+    def __init__(self, d_latent, d_emb):
+        self.token_predense = TimeDistributed(Dense(d_emb, activation='relu'))
+        self.latent_predense = Dense(d_latent, activation='relu')
+        self.concat_predense = TimeDistributed(Dense(d_emb, activation='relu'))
+        self.gamma = TimeDistributed(Dense(d_emb))
+        self.beta = TimeDistributed(Dense(d_emb))
+
+    def __call__(self, h, z):
+        '''
+
+        :param h: decoder representation
+        :param z: latent vector
+        :return: FiLMed decoder representation
+        '''
+        z = self.latent_predense(z)
+        h_ = self.token_predense(h)
+        z = Lambda(lambda x: K.repeat(x, K.shape(h)[1]))(z)
+        zh = Concatenate(axis=2)([z, h_])
+        zh = self.concat_predense(zh)
+        gamma = self.gamma(zh)
+        beta = self.beta(zh)
+        return Lambda(lambda x: x[0]*zh + x[1])([gamma, beta])
+
+class DecoderLayerFiLM():
+    def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v, d_latent, dropout=0.1):
+        self.self_att_layer = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
+        self.enc_att_layer = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
+        self.pos_ffn_layer = PositionwiseFeedForward(d_model, d_inner_hid, dropout=dropout)
+        self.film_layer = FiLM(d_latent, d_model)
+
+    def __call__(self, dec_input, enc_output, z_latent, self_mask=None, enc_mask=None):
+        output, slf_attn = self.self_att_layer(dec_input, dec_input, dec_input, mask=self_mask)
+        output, enc_attn = self.enc_att_layer(output, enc_output, enc_output, mask=enc_mask)
+        output = self.film_layer(output, z_latent)
+        output = self.pos_ffn_layer(output)
+        return output, slf_attn, enc_attn
+
+
+class DecoderWithFILM():
+    def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v, d_latent,
                  layers=6, dropout=0.1, word_emb=None, pos_emb=None):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
-        self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
+        self.layers = [DecoderLayerFiLM(d_model, d_inner_hid, n_head, d_k, d_v, d_latent, dropout) for _ in range(layers)]
 
-    def __call__(self, tgt_seq, tgt_pos, src_seq, enc_output, return_att=False, active_layers=999):
+    def __call__(self, tgt_seq, tgt_pos, src_seq, enc_output, z_latent, return_att=False, active_layers=999):
+
         dec = self.emb_layer(tgt_seq)
         pos = self.pos_layer(tgt_pos)
         x = Add()([dec, pos])
 
-        self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(tgt_seq)
-        self_sub_mask = Lambda(GetSubMask)(tgt_seq)
-        self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
-        # TODO(Basil) Use encoder mask that actually matches dimensions from interim decoder
-        enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([tgt_seq, src_seq])
+        self_pad_mask = Lambda(lambda x: GetPadMask(x, x), name='DecoderPadMask')(tgt_seq)
+        self_sub_mask = Lambda(GetSubMask, name='DecoderSubMask')(tgt_seq)
+        self_mask = Lambda(lambda x: K.minimum(x[0], x[1]), name='DecoderSelfMask')([self_pad_mask, self_sub_mask])
+
+        # Don't want encoder mask as there should be no padding from latent dim
+        enc_mask = None
+        # Lambda(lambda x: GetPadMask(x[0], x[1]), name='DecoderEncMask')([tgt_seq, src_seq])
 
         if return_att: self_atts, enc_atts = [], []
 
         for dec_layer in self.layers[:active_layers]:
-            x, self_att, enc_att = dec_layer(x, enc_output, self_mask, enc_mask)
+            x, self_att, enc_att = dec_layer(x, enc_output, z_latent, self_mask, enc_mask)
+
             if return_att:
                 self_atts.append(self_att)
                 enc_atts.append(enc_att)
 
         return (x, self_atts, enc_atts) if return_att else x
-
 
 class LRSchedulerPerStep(Callback):
     def __init__(self, d_model, warmup=4000):
