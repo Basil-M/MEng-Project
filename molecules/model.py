@@ -156,8 +156,8 @@ class TriTransformer:
 
         self.false_embedder = tr.FalseEmbeddings(d_emb=self.p["d_model"], d_latent=self.p["latent_dim"])
 
-        self.use_FILM = True
-        if self.use_FILM:
+
+        if self.p["decoder"] == "TRANSFORMER_FILM":
             self.decoder = tr.DecoderWithFILM(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"],
                                               self.p["d_k"], self.p["d_v"], self.p["latent_dim"], self.p["layers"],
                                               self.p["dropout"], word_emb=dec_word_emb, pos_emb=dec_pos_emb)
@@ -570,7 +570,7 @@ class TriTransformer:
         for i in range(self.p["len_limit"] - 1):
             if lastk == 0 or len(final_results) > topk * 3: break
 
-            if self.p["decoder"] == "TRANSFORMER":
+            if "TRANSFORMER" in self.p["decoder"]:
                 # Transformer requires most recent symbol
                 output = self.decode.predict_on_batch([z, target_seq])
             else:

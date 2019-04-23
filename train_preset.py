@@ -72,6 +72,8 @@ def get_arguments():
                         help='Latent dimension')
     parser.add_argument('--use_WAE', type=bool, metavar='N', default=False,
                         help="Choice to use Normal IMQ WAE with s = 2, weight = 10")
+    parser.add_argument('--use_FILM', type=bool, metavar='N', default=False,
+                        help="Choice to use FILM layers in decoder")
     parser.add_argument('--model_folder', type=str, metavar='N', default=None,
                         help="Specify model folder. If specified, all other options are ignored.")
     return parser.parse_args()
@@ -88,6 +90,7 @@ def main():
     else:
         model_name = "{}_{}_d{}_{}".format(mnames[args.bottleneck], args.model_size, args.latent_dim,
                                            "WAE" if args.use_WAE else "VAE")
+
         model_dir = args.models_dir + model_name + "/"
         if not os.path.exists(model_dir):
             os.mkdir(model_dir)
@@ -104,6 +107,11 @@ def main():
         params["decoder"] = "TRANSFORMER"
         params["latent_dim"] = args.latent_dim
         params["model"] = model_name
+
+        if args.use_FILM:
+            model_name += "_FILM"
+            params["decoder"] += "_FILM"
+
     # Get training and test data from data file
     # Set up model
     if not args.model_folder:

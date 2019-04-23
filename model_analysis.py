@@ -292,7 +292,7 @@ def main():
     data_train, data_test, props_train, props_test, tokens = load_dataset(d_file, d_type, False)
     props_train, props_test, prop_labels = load_properties(d_file)
 
-    if model_params["decoder"] == "TRANSFORMER":
+    if "TRANSFORMER" in model_params["decoder"]:
         # Model is an attention based model
         model = TriTransformer(tokens, model_params)
         model.build_models()
