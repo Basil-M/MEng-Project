@@ -156,7 +156,6 @@ class TriTransformer:
 
         self.false_embedder = tr.FalseEmbeddings(d_emb=self.p["d_model"], d_latent=self.p["latent_dim"])
 
-
         if self.p["decoder"] == "TRANSFORMER_FILM":
             self.decoder = tr.DecoderWithFILM(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"],
                                               self.p["d_k"], self.p["d_v"], self.p["latent_dim"], self.p["layers"],
@@ -213,7 +212,7 @@ class TriTransformer:
         for l_vec in [z_input, z_sampled]:
             # 'false embed' for decoder
             dec_input = self.false_embedder(l_vec)
-            if self.use_FILM:
+            if "FILM" in self.p["decoder"]:
                 dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq, tgt_pos, l_vec, dec_input, l_vec,
                                                                  active_layers=active_layers, return_att=True)
             else:
@@ -617,8 +616,12 @@ class TransformerEncoder():
         # if kl_loss_var is not None:
         #     stddev = params["stddev"] * kl_loss_var / params["kl_max_weight"]
         self.word_emb = word_emb
-        if "average" in params["bottleneck"] or "sum" in params["bottleneck"]:
-            self.encoder_to_latent = tr.latent_dict[params["bottleneck"]](params["d_model"], params["latent_dim"])
+        if params["bottleneck"] == "attention":
+            self.encoder_to_latent = tr.Multihead_Attn(params["d_model"], params["latent_dim"],
+                                                       heads=params["AM_heads"],
+                                                       attn_mechanism=params["AM_type"],
+                                                       use_softmax=params["AM_softmax"])
+            # self.encoder_to_latent = tr.latent_dict[params["bottleneck"]](params["d_model"], params["latent_dim"])
         elif "ar" in params["bottleneck"]:
             latent_pos_emb = tr.Embedding(params["latent_dim"], params["ID_d_model"], trainable=False)
             self.encoder_to_latent = tr.latent_dict[params["bottleneck"]](params["ID_d_model"],

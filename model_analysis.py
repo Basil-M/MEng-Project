@@ -114,6 +114,7 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, mode
     data_test = list(data_test[indices])
     props_test = props_test[indices, :]
     successful_seeds = 0
+    novel_seeds = 0
     num_valid = 0
     output_molecules = []
     num_novel = -1
@@ -144,6 +145,7 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, mode
                 s = np.array(s)
                 if s.ndim > 1: s = s[:, 0]
                 success = False  # Track whether we produced a valid molecule from this seed
+                novel = False
                 for (i, mol) in enumerate(s):
                     rd_mol = Chem.MolFromSmiles(mol)
                     if rd_mol:
@@ -156,13 +158,14 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, mode
                             if data_file:
                                 if not Chem.MolToSmiles(rd_mol) in canon_structs:
                                     num_novel += 1
+                                    novel = True
                             try:
                                 gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
                             except:
                                 pass
                 #                                print("Could not calculate properties for {}".format(mol))
-                if success:
-                    successful_seeds += 1
+                if success: successful_seeds += 1
+                if novel: novel_seeds += 1
                 bar_i += 1
                 bar.update(bar_i)
     print("Using seeded sampling:")
@@ -189,7 +192,8 @@ def property_distributions(data_test, props_test, num_seeds, num_decodings, mode
               "output_mols": output_molecules,
               "num_valid": num_valid,
               "num_mols": len(output_molecules),
-              "success_frac": successful_seeds / (num_decodings*num_seeds),
+              "p_success": successful_seeds / (num_decodings*num_seeds),
+              "p_novel": novel_seeds / (num_decodings*num_seeds),
               "yield": num_valid / num_seeds}
 
     if data_file:
@@ -222,6 +226,7 @@ def rand_mols(nseeds, latent_dim, model: TriTransformer, beam_width=1, data_file
         num_novel = 0
 
     successful_seeds = 0  # Track number of latent space points which give a valid decoding
+    novel_seeds = 0       # Track number of latent space points which give a novel decoding
     # progressbar
     # decode molecules multiple times
     gen_props = []
@@ -238,6 +243,7 @@ def rand_mols(nseeds, latent_dim, model: TriTransformer, beam_width=1, data_file
             s = np.array(s)
             if s.ndim > 1: s = s[:, 0]
 
+            novel = False
             success = False
             for mol in s:
                 rd_mol = Chem.MolFromSmiles(mol)
@@ -253,12 +259,14 @@ def rand_mols(nseeds, latent_dim, model: TriTransformer, beam_width=1, data_file
                         if data_file:
                             if not Chem.MolToSmiles(rd_mol) in canon_structs:
                                 num_novel += 1
+                                novel = True
                         try:
                             gen_props.append([rdkit_funcs[key](mol) for key in rdkit_funcs])
                         except:
                             pass
                             # print("Could not calculate properties for {}".format(mol))  # bar.update(bar_i)
             if success: successful_seeds += 1
+            if novel: novel_seeds += 1
             bar.update(bar_i)
     print("From {} seeds, had {} successful decodings.".format(nseeds, successful_seeds))
     print("Generated {} unique sequences, of which {} were valid.".format(len(output_molecules), len(gen_props)))
@@ -266,7 +274,8 @@ def rand_mols(nseeds, latent_dim, model: TriTransformer, beam_width=1, data_file
               "output_mols": output_molecules,
               "num_mols": len(output_molecules),
               "num_valid": num_valid,
-              "success_frac": successful_seeds / nseeds,
+              "p_success": successful_seeds / nseeds,
+              "p_novel": novel_seeds/nseeds,
               "yield": num_valid / nseeds}
     if data_file:
         output["num_novel"] = num_novel
@@ -338,7 +347,7 @@ def main():
     print("Generated {} molecules, of which {} were valid.".format(output["num_mols"], output["num_valid"]))
     print("\tValid mols:\t {:.2f}".format(output["num_valid"] / output["num_mols"]))
     if "num_novel" in output: print("\tNovel mols:\t{:.2f}".format(output["num_novel"]))
-    print("\tSuccess frac:\t{:.2f}".format(output["success_frac"]))
+    print("\tSuccess frac:\t{:.2f}".format(output["p_success"]))
     print("\tYield:\t{:.2f}".format(output["yield"]))
     for (i, key) in enumerate(rdkit_funcs):
         if key in prop_labels:

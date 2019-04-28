@@ -332,35 +332,88 @@ class KQV_Attn():
         return outp
 
 
-class AvgLatent2():
-    def __init__(self, d_model, latent_dim):
-        self.attn_mechanism = KQV_Attn(d_in=d_model, d_out=latent_dim, activation='linear', use_softmax=True)
-        self.after_avg = Dense(latent_dim, input_shape=(latent_dim,), activation='relu')
-        self.mean_layer = Dense(latent_dim, input_shape=(latent_dim,), name='mean_layer')
-        self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer')
+class Additive_Attn():
+    def __init__(self, d_in, d_out, activation='linear', use_softmax=True):
+        self.keys = TimeDistributed(Dense(d_in, input_shape=(d_in,), activation=activation))
+        self.queries = TimeDistributed(Dense(d_in, input_shape=(d_in,), activation=activation))
+        self.e_t = TimeDistributed(Dense(1, input_shape=(d_in,)))
+        self.values = TimeDistributed(Dense(d_out, input_shape=(d_in,), activation=activation))
+        self.tanh = Activation('tanh')
+        self.softmax = use_softmax
+        self.d = d_in
 
-    def __call__(self, encoder_output):
-        # encoder output should be [batch size, length, d_model]
-        h = self.attn_mechanism(encoder_output)
-        h = self.after_avg(h)
-        return self.mean_layer(h), self.logvar_layer(h)
+    def __call__(self, x):
+        key = self.keys(x)
+        query = self.queries(x)
+        value = self.values(x)
 
+        attn = self.tanh(Add()([query, key]))  # [batch_size x len x d_model]
+        attn = self.e_t(attn)
+        attn = Lambda(lambda x: K.squeeze(x, 2))(attn)
+        # attn = Lambda(lambda x: tf.matrix_diag_part(K.batch_dot(x[0], x[1], axes=2)))([key, query])
+        if self.softmax:
+            attn = Softmax()(attn)
 
-class AvgLatent4():
-    def __init__(self, d_model, latent_dim, heads=4):
+        outp = Lambda(lambda x: K.batch_dot(x[0], x[1], axes=(1, 1)))([attn, value])
+
+        return outp
+
+#
+# class AvgLatent2():
+#     def __init__(self, d_model, latent_dim, attn_mechanism="KQV", use_softmax=True):
+#         if attn_mechanism == "KQV":
+#             self.attn_mechanism = KQV_Attn(d_in=d_model, d_out=latent_dim, activation='linear', use_softmax=use_softmax)
+#         else:
+#             self.attn_mechanism = Additive_Attn(d_in=d_model, d_out=latent_dim, activation='linear', use_softmax=use_softmax)
+#         self.after_avg = Dense(latent_dim, input_shape=(latent_dim,), activation='relu')
+#         self.mean_layer = Dense(latent_dim, input_shape=(latent_dim,), name='mean_layer')
+#         self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer')
+#         if not use_softmax:
+#             self.prelogvar_layer = Dense(latent_dim, input_shape=(latent_dim,), activation='tanh', name='prelogvar')
+#         else:
+#             self.prelogvar_layer = None
+#
+#     def __call__(self, encoder_output):
+#         # encoder output should be [batch size, length, d_model]
+#         h = self.attn_mechanism(encoder_output)
+#         h = self.after_avg(h)
+#         mean = self.mean_layer(h)
+#         if self.prelogvar_layer:
+#             h = self.prelogvar_layer(h)
+#         logvar = self.logvar_layer(h)
+#         return mean, logvar
+
+class Multihead_Attn():
+    def __init__(self, d_model, latent_dim, heads=4, attn_mechanism="KQV", use_softmax = True):
         d_kqv = int(np.ceil(d_model / heads))
-        self.attns = [KQV_Attn(d_model, d_kqv, activation='linear') for _ in range(heads)]
+        if attn_mechanism == "KQV":
+            self.attns = [KQV_Attn(d_model, d_kqv, activation='linear') for _ in range(heads)]
+        else:
+            self.attns = [Additive_Attn(d_model, d_kqv, activation='linear') for _ in range(heads)]
+
         self.after_avg = Dense(latent_dim, input_shape=(d_kqv * heads,), activation='relu')
         self.mean_layer = Dense(latent_dim, input_shape=(latent_dim,), name='mean_layer')
         self.logvar_layer = Dense(latent_dim, input_shape=(latent_dim,), name='logvar_layer')
 
+        if not use_softmax:
+            self.prelogvar_layer = Dense(latent_dim, input_shape=(latent_dim,), activation='tanh', name='prelogvar')
+        else:
+            self.prelogvar_layer = None
+
     def __call__(self, encoder_output):
         # encoder output should be [batch size, length, d_model]
         h = [layer(encoder_output) for layer in self.attns]
-        h = Concatenate(axis=-1)(h)
+        if len(h) == 1:
+            h = h[0]
+        else:
+            h = Concatenate(axis=-1)(h)
         h = self.after_avg(h)
-        return self.mean_layer(h), self.logvar_layer(h)
+        mean = self.mean_layer(h)
+        if self.prelogvar_layer:
+            h = self.prelogvar_layer(h)
+        logvar = self.logvar_layer(h)
 
+        return mean, logvar
 
 class AvgLatent3():
     def __init__(self, d_model, latent_dim):
@@ -623,7 +676,7 @@ class InterimDecoder():
             # This z0 is the first time the FalseEmbedder will be used
             # It has known shape [?, width]; so the FalseEmbedder expects this shape, but it should
             # be able to take [?, ?] as an input...
-            z0 = K.reshape(z0, shape=[batch_size, -1])
+            # z0 = K.reshape(z0, shape=[batch_size, -1])
             return z0
             # return tf.keras.backend.zeros([batch_size, self.decoder_width], dtype='float', name='zeros')
 
@@ -1356,7 +1409,8 @@ class FiLM():
         zh = self.concat_predense(zh)
         gamma = self.gamma(zh)
         beta = self.beta(zh)
-        return Lambda(lambda x: x[0]*zh + x[1])([gamma, beta])
+        return Lambda(lambda x: x[0] * zh + x[1])([gamma, beta])
+
 
 class DecoderLayerFiLM():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v, d_latent, dropout=0.1):
@@ -1378,7 +1432,8 @@ class DecoderWithFILM():
                  layers=6, dropout=0.1, word_emb=None, pos_emb=None):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
-        self.layers = [DecoderLayerFiLM(d_model, d_inner_hid, n_head, d_k, d_v, d_latent, dropout) for _ in range(layers)]
+        self.layers = [DecoderLayerFiLM(d_model, d_inner_hid, n_head, d_k, d_v, d_latent, dropout) for _ in
+                       range(layers)]
 
     def __call__(self, tgt_seq, tgt_pos, src_seq, enc_output, z_latent, return_att=False, active_layers=999):
 
@@ -1404,6 +1459,7 @@ class DecoderWithFILM():
                 enc_atts.append(enc_att)
 
         return (x, self_atts, enc_atts) if return_att else x
+
 
 class LRSchedulerPerStep(Callback):
     def __init__(self, d_model, warmup=4000):
@@ -1441,9 +1497,9 @@ class AddPosEncoding:
 add_layer = Lambda(lambda x: x[0] + x[1], output_shape=lambda x: x[0])
 
 latent_dict = {"average1": AvgLatent,
-               "average2": AvgLatent2,
+#               "average2": AvgLatent2,
                "average3": AvgLatent3,
-               "average4": AvgLatent4,
+               "attention": Multihead_Attn,
                "sum1": SumLatent,
                "sum2": SumLatent2,
                "ar1": InterimDecoder,

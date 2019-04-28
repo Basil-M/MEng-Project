@@ -64,9 +64,9 @@ def get_arguments():
                         help='Number of epochs to run during training.')
     parser.add_argument('--batch_size', type=int, metavar='N', default=40,
                         help='Number of samples to process per minibatch during training.')
-    parser.add_argument('--bottleneck', type=str, metavar='N', default="average4",
+    parser.add_argument('--bottleneck', type=str, metavar='N', default="sum",
                         help='Choice of bottleneck')
-    parser.add_argument('--model_size', type=str, metavar='N', default="small",
+    parser.add_argument('--model_size', type=str, metavar='N', default="medium",
                         help='Number of samples to process per minibatch during training.')
     parser.add_argument('--latent_dim', type=int, metavar='N', default=60,
                         help='Latent dimension')
@@ -76,6 +76,12 @@ def get_arguments():
                         help="Choice to use FILM layers in decoder")
     parser.add_argument('--model_folder', type=str, metavar='N', default=None,
                         help="Specify model folder. If specified, all other options are ignored.")
+
+    # attention params
+    parser.add_argument('--heads', type=int, metavar='N', default=4,
+                        help="Number of heads for attention mechanism")
+    parser.add_argument('--attn_mech', type=str, metavar='N', default="Add",
+                        help="Attention mechanism. Options: KQV, Add")
     return parser.parse_args()
 
 
@@ -88,12 +94,7 @@ def main():
         params.load(model_dir + "/params.pkl")
         model_name = params["model"]
     else:
-        model_name = "{}_{}_d{}_{}".format(mnames[args.bottleneck], args.model_size, args.latent_dim,
-                                           "WAE" if args.use_WAE else "VAE")
 
-        model_dir = args.models_dir + model_name + "/"
-        if not os.path.exists(model_dir):
-            os.mkdir(model_dir)
         # Get default attention parameters
         params = utils.AttnParams()
 
@@ -106,12 +107,34 @@ def main():
         params["stddev"] = 1
         params["decoder"] = "TRANSFORMER"
         params["latent_dim"] = args.latent_dim
-        params["model"] = model_name
 
+        # handle attention bottleneck
+        if params["bottleneck"] == "avg" or params["bottleneck"] == "sum":
+            model_name = params["bottleneck"]
+            if params["bottleneck"] == "sum": params["AM_softmax"] = False
+            params["bottleneck"] = "attention"
+            params["AM_heads"] = args.heads
+            if args.heads != 1:
+                model_name += "-mh" + str(args.heads)
+
+            params["AM_type"] = args.attn_mech
+            model_name += "-" + args.attn_mech
+
+            model_name = "{}_{}_d{}_{}".format(model_name, args.model_size, args.latent_dim,
+                                               "WAE" if args.use_WAE else "VAE")
+        else:
+            model_name = "{}_{}_d{}_{}".format(mnames[args.bottleneck], args.model_size, args.latent_dim,
+                                               "WAE" if args.use_WAE else "VAE")
+
+        # handle FILM
         if args.use_FILM:
             model_name += "_FILM"
             params["decoder"] += "_FILM"
 
+        model_dir = args.models_dir + model_name + "/"
+        if not os.path.exists(model_dir):
+            os.mkdir(model_dir)
+        params["model"] = model_name
     # Get training and test data from data file
     # Set up model
     if not args.model_folder:
@@ -128,6 +151,7 @@ def main():
             params["d_k"] = 6
             params["heads"] = 6
             params["layers"] = 2
+
             if params["bottleneck"] == "ar_slim":
                 params["ID_layers"] = 3
                 params["ID_d_model"] = 6
@@ -266,7 +290,7 @@ def main():
                                                              params["pp_weight"])
     props_train, props_test, prop_labels = utils.load_properties(args.data)
 
-    num_seeds = 500
+    num_seeds = 400
     num_decodings = 10
     num_prior_samples = 1000
     with supress_stderr():
@@ -294,7 +318,7 @@ def main():
 
         print("\t\tValid mols:\t {:.2f}".format(output["num_valid"] / output["num_mols"]))
         if "num_novel" in output: print("\t\tNovel mols:\t{:.2f}".format(output["num_novel"] / output["num_valid"]))
-        print("\t\tSuccess frac:\t{:.2f}".format(output["success_frac"]))
+        print("\t\tSuccess frac:\t{:.2f}".format(output["p_success"]))
         print("\t\tYield:\t{:.2f}".format(output["yield"]))
 
         for (i, key) in enumerate(utils.rdkit_funcs):
@@ -336,7 +360,7 @@ def createResultsFile(models_dir):
     if not os.path.exists(models_dir + "/samplingresults.csv"):
         def append_titles(d):
             d.extend(["num_unique", "num_valid", "num_novel",
-                      "frac_valid", "frac_novel", "p_success",
+                      "frac_valid", "frac_novel", "p_success", "p_novel",
                       "yield"])
             for prop in utils.rdkit_funcs:
                 d.append("{}_mean".format(prop))
@@ -357,12 +381,13 @@ def createResultsFile(models_dir):
 
 def saveResults(params, val_acc, seeded_output, prior_output, num_seeds, num_decodings, num_prior_samples, models_dir):
     def append_output(output, d):
-        d.append(seeded_output["num_mols"])
+        d.append(output["num_mols"])
         d.append(output["num_valid"])
         d.append(output["num_novel"])
         d.append(np.round(output["num_valid"] / output["num_mols"], 3))
         d.append(np.round(output["num_novel"] / output["num_mols"], 3))
-        d.append(np.round(output["success_frac"], 3))
+        d.append(np.round(output["p_success"], 3))
+        d.append(np.round(output["p_novel"], 3))
         d.append(np.round(output["yield"], 3))
         for (i, prop) in enumerate(utils.rdkit_funcs):
             d.append(np.round(np.mean(output["gen_props"][:, i]), 3))

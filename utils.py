@@ -381,9 +381,12 @@ class AttnParams:
             "heads": 4,
             "layers": 1,
             "dropout": 0.1,
-            "bottleneck": "average2",
+            "bottleneck": "attention",  # Choice of bottleneck: attention, ar_log, ar1, ar2, ar_slim, conv, gru, gru_attn
+            "AM_heads": 4,              # Number of attention heads
+            "AM_type": "KQV",           # Attention mechanism type - KQV or Additive
+            "AM_softmax": True,         # Whether to use softmax for attention values
             "pp_layers": 3,             # Number of property predictor layers
-            "ID_d_model": None,
+            "ID_d_model": None,         # Interim decoder model dimension
             "ID_d_inner_hid": None,
             "ID_heads": None,
             "ID_d_k": None,
