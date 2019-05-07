@@ -64,9 +64,9 @@ def get_arguments():
                         help='Number of epochs to run during training.')
     parser.add_argument('--batch_size', type=int, metavar='N', default=40,
                         help='Number of samples to process per minibatch during training.')
-    parser.add_argument('--bottleneck', type=str, metavar='N', default="sum",
+    parser.add_argument('--bottleneck', type=str, metavar='N', default="conv",
                         help='Choice of bottleneck')
-    parser.add_argument('--model_size', type=str, metavar='N', default="medium",
+    parser.add_argument('--model_size', type=str, metavar='N', default="big",
                         help='Number of samples to process per minibatch during training.')
     parser.add_argument('--latent_dim', type=int, metavar='N', default=60,
                         help='Latent dimension')
@@ -80,7 +80,7 @@ def get_arguments():
     # attention params
     parser.add_argument('--heads', type=int, metavar='N', default=4,
                         help="Number of heads for attention mechanism")
-    parser.add_argument('--attn_mech', type=str, metavar='N', default="Add",
+    parser.add_argument('--attn_mech', type=str, metavar='N', default="KQV",
                         help="Attention mechanism. Options: KQV, Add")
     return parser.parse_args()
 
@@ -222,8 +222,8 @@ def main():
         elif args.model_size == "big" or args.model_size == "large":
             # big avg:      1,131,745
             # big ar_log:   1,316,449
-            # big GRU:      1,029,152
-            # big CONV:     439,419
+            # big GRU:      1,166,740
+            # big CONV:     800k
             params["d_model"] = 128
             params["d_inner_hid"] = 768
             params["d_k"] = 12
@@ -240,11 +240,11 @@ def main():
                 params["ID_heads"] = 6
             elif "gru" in params["bottleneck"]:
                 params["ID_layers"] = 5
-                params["ID_d_model"] = 160
-        elif params["bottleneck"] == "conv":
-            params["ID_layers"] = 4
-            params["ID_d_k"] = 9
-            params["ID_d_model"] = 512
+                params["ID_d_model"] = 196
+            elif params["bottleneck"] == "conv":
+                params["ID_layers"] = 5
+                params["ID_d_k"] = 8
+                params["ID_d_model"] = 756
 
         params["d_v"] = params["d_k"]
 

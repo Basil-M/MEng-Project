@@ -196,6 +196,7 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
     model_trained = params["current_epoch"] > params["epochs"]
     n_pretrain = params["kl_pretrain_epochs"] + params["kl_anneal_epochs"]
     results = None
+
     while not model_trained:
         pretraining_done = params["current_epoch"] > n_pretrain
         cb = []

@@ -154,7 +154,11 @@ class TriTransformer:
             dec_word_emb = self.word_emb
             dec_pos_emb = pos_emb
 
-        self.false_embedder = tr.FalseEmbeddings(d_emb=self.p["d_model"], d_latent=self.p["latent_dim"])
+        if "TD" in self.p["decoder"]:
+            self.false_embedder = tr.FalseEmbeddingsTD(d_emb=self.p["d_model"], d_latent=self.p["latent_dim"],
+                                                       params=self.p)
+        else:
+            self.false_embedder = tr.FalseEmbeddings(d_emb=self.p["d_model"], d_latent=self.p["latent_dim"])
 
         if self.p["decoder"] == "TRANSFORMER_FILM":
             self.decoder = tr.DecoderWithFILM(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"],
@@ -475,20 +479,26 @@ class TriTransformer:
                                          2 * expected_rbf(mu, var, prior_mu, prior_var))
 
     def get_moments(self, input):
+        print("Getting moments for input", input)
         if isinstance(input, str):
             # have been given a string
             input_seq = self.i_tokens.tokenize(input)
         else:
             input_seq = input
 
+        if len(input_seq) == 1:
+            input_seq = input_seq[0]
+
         if self.p["bottleneck"] == "conv":
             # Must pad with zeros
             s = np.zeros(self.p["len_limit"])
             s[0:len(input_seq)] = input_seq
             input_seq = s
+            print("Padded input seq", input_seq)
 
         # get mean & logvar
-        input_seq = np.expand_dims(input_seq, axis=0)
+        if input_seq.ndim == 1:
+            input_seq = np.expand_dims(input_seq, axis=0)
         mean, logvar = self.encode.predict_on_batch([input_seq])
         return mean, logvar
 
@@ -501,7 +511,8 @@ class TriTransformer:
             input_seq = s
 
         # get mean & logvar
-        input_seq = np.expand_dims(input_seq, axis=0)
+        if input_seq.ndim == 1:
+            input_seq = np.expand_dims(input_seq, axis=0)
         mean, logvar = self.encode.predict_on_batch([input_seq])
         return self.decode_from_moments(mean, logvar, beam_width, delimiter)
 
@@ -612,9 +623,6 @@ class TransformerEncoder():
                                   params["d_v"],
                                   params["layers"], params["dropout"], word_emb=word_emb, pos_emb=pos_emb)
 
-        # # self.false_embedder = tr.FalseEmbeddings(d_emb=self.d_model)
-        # if kl_loss_var is not None:
-        #     stddev = params["stddev"] * kl_loss_var / params["kl_max_weight"]
         self.word_emb = word_emb
         if params["bottleneck"] == "attention":
             self.encoder_to_latent = tr.Multihead_Attn(params["d_model"], params["latent_dim"],

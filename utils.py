@@ -352,6 +352,11 @@ rdkit_funcs = {"QED": lambda x: QED(str2mol(x)),
                "SAS": lambda x: calculateScore(str2mol(x)),
                "LOGP": lambda x: LogP(str2mol(x))}
 
+rdkit_funcs_mol = {"QED": lambda x: QED(x),
+               "MOLWT": lambda x: MolWt(x),
+               "SAS": lambda x: calculateScore(x),
+               "LOGP": lambda x: LogP(x)}
+
 
 class AttnParams:
     _params = None
@@ -372,7 +377,7 @@ class AttnParams:
             "WAE_s": 2,
             "stddev": 1,
             "pp_weight": 1.25,
-            "decoder": "TRANSFORMER",  # Model params
+            "decoder": "TRANSFORMER_TD",  # Model params
             "latent_dim": 32,
             "d_model": 24,
             "d_inner_hid": 196,

@@ -163,7 +163,10 @@ class DecoderLayer():
 
     def __call__(self, dec_input, enc_output, self_mask=None, enc_mask=None):
         output, slf_attn = self.self_att_layer(dec_input, dec_input, dec_input, mask=self_mask)
+        output = debugPrint(output, "Decoder Self Attention Output")
         output, enc_attn = self.enc_att_layer(output, enc_output, enc_output, mask=enc_mask)
+        output = debugPrint(output, "Decoder Enc-Dec Output")
+        enc_attn = debugPrint(enc_attn, "EncDec-Attn:")
         output = self.pos_ffn_layer(output)
         return output, slf_attn, enc_attn
 
@@ -358,6 +361,7 @@ class Additive_Attn():
 
         return outp
 
+
 #
 # class AvgLatent2():
 #     def __init__(self, d_model, latent_dim, attn_mechanism="KQV", use_softmax=True):
@@ -384,7 +388,7 @@ class Additive_Attn():
 #         return mean, logvar
 
 class Multihead_Attn():
-    def __init__(self, d_model, latent_dim, heads=4, attn_mechanism="KQV", use_softmax = True):
+    def __init__(self, d_model, latent_dim, heads=4, attn_mechanism="KQV", use_softmax=True):
         d_kqv = int(np.ceil(d_model / heads))
         if attn_mechanism == "KQV":
             self.attns = [KQV_Attn(d_model, d_kqv, activation='linear') for _ in range(heads)]
@@ -414,6 +418,7 @@ class Multihead_Attn():
         logvar = self.logvar_layer(h)
 
         return mean, logvar
+
 
 class AvgLatent3():
     def __init__(self, d_model, latent_dim):
@@ -1228,7 +1233,7 @@ class InterimDecoder5():
 
 
 class FalseEmbeddingsTD():
-    def __init__(self, d_emb, d_latent=None, residual=True, layers=1):
+    def __init__(self, d_emb, d_latent, params):
         '''
         Given a 1D vector, attempts to create 'false' embeddings to
         go from latent space
@@ -1236,16 +1241,15 @@ class FalseEmbeddingsTD():
         '''
         self.l1 = Dense(d_latent, input_shape=(d_latent,), activation='relu')
         self.l2 = Dense(d_latent, input_shape=(d_latent,))
-        self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,)))
-        self.deep_layers = [TimeDistributed(Dense(d_emb, activation='relu', input_shape=(d_emb,))) for _ in
-                            range(layers)]
 
-        # Whether or not to employ residual connection
-        self.residual = residual
-        if self.residual:
-            self.deep_res_layers = [TimeDistributed(Dense(d_emb, input_shape=(d_emb,))) for _ in
-                                    range(layers)]
-        self.final_lin = TimeDistributed(Dense(d_emb, input_shape=(d_emb,)))
+        self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,), activation='sigmoid'))
+        self.prelayer = TimeDistributed(Dense(d_emb, input_shape=(d_emb,)))
+        self.enc_layers = [
+            EncoderLayer(d_model=d_emb, d_inner_hid=params["d_inner_hid"], n_head=params["heads"], d_k=params["d_k"],
+                         d_v=params["d_v"], dropout=params["dropout"])
+            for _ in range(2)]
+
+        #self.final_lin = TimeDistributed(Dense(d_emb, input_shape=(d_emb,)))
 
     def __call__(self, z):
         '''
@@ -1259,16 +1263,12 @@ class FalseEmbeddingsTD():
 
         # use fully connected layer to expand to [batch_size, d, d_emb]
         z = self.init_layer(z)
+        z = self.prelayer(z)
 
-        for (i, layer) in enumerate(self.deep_layers):
-            if self.residual:
-                z_w = self.deep_res_layers[i](layer(z))
-                z = Add()([z, z_w])
-                # z = z + layer(z)
-            else:
-                z = layer(z)
+        for layer in self.enc_layers:
+            z, _ = layer(z, None)
 
-        return self.final_lin(z)
+        return z #self.final_lin(z)
 
 
 class FalseEmbeddings():
@@ -1497,7 +1497,7 @@ class AddPosEncoding:
 add_layer = Lambda(lambda x: x[0] + x[1], output_shape=lambda x: x[0])
 
 latent_dict = {"average1": AvgLatent,
-#               "average2": AvgLatent2,
+               #               "average2": AvgLatent2,
                "average3": AvgLatent3,
                "attention": Multihead_Attn,
                "sum1": SumLatent,
