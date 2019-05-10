@@ -154,21 +154,25 @@ class TriTransformer:
             dec_word_emb = self.word_emb
             dec_pos_emb = pos_emb
 
-        if "TD" in self.p["decoder"]:
+        # False embedder
+        if "NoFE" in self.p["decoder"]:
+            self.false_embedder = None
+        elif "TD" in self.p["decoder"]:
             self.false_embedder = tr.FalseEmbeddingsTD(d_emb=self.p["d_model"], d_latent=self.p["latent_dim"],
                                                        params=self.p)
         else:
             self.false_embedder = tr.FalseEmbeddings(d_emb=self.p["d_model"], d_latent=self.p["latent_dim"])
 
-        if self.p["decoder"] == "TRANSFORMER_FILM":
-            self.decoder = tr.DecoderWithFILM(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"],
-                                              self.p["d_k"], self.p["d_v"], self.p["latent_dim"], self.p["layers"],
-                                              self.p["dropout"], word_emb=dec_word_emb, pos_emb=dec_pos_emb)
-        else:
+        if self.p["decoder"] == "TRANSFORMER":
             self.decoder = tr.TransformerDecoder(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"],
                                                  self.p["d_k"],
                                                  self.p["d_v"], self.p["layers"], self.p["dropout"],
                                                  word_emb=dec_word_emb, pos_emb=dec_pos_emb)
+        else:
+            self.decoder = tr.DecoderLatent(self.p["d_model"], self.p["d_inner_hid"], self.p["heads"],
+                                            self.p["d_k"], self.p["d_v"], self.p["latent_dim"], self.p["decoder"],
+                                            self.p["layers"], self.p["dropout"], word_emb=dec_word_emb,
+                                            pos_emb=dec_pos_emb)
         self.p = params
         self.target_layer = TimeDistributed(Dense(self.o_tokens.num(), use_bias=False))
 
@@ -215,12 +219,16 @@ class TriTransformer:
         props = []
         for l_vec in [z_input, z_sampled]:
             # 'false embed' for decoder
-            dec_input = self.false_embedder(l_vec)
-            if "FILM" in self.p["decoder"]:
-                dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq, tgt_pos, l_vec, dec_input, l_vec,
+            if "NoFE" in self.p["decoder"]:
+                z_seq = None
+            else:
+                z_seq = self.false_embedder(l_vec)
+            if self.p["decoder"] == "TRANSFORMER":
+                dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq, tgt_pos, l_vec, z_seq,
                                                                  active_layers=active_layers, return_att=True)
             else:
-                dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq, tgt_pos, l_vec, dec_input,
+                # For FiLM or NoFE decoders, we require the latent vector
+                dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq, tgt_pos, l_vec, z_seq, l_vec,
                                                                  active_layers=active_layers, return_att=True)
 
             dec_output = debugPrint(dec_output, "DEC_OUTPUT")
@@ -567,7 +575,6 @@ class TriTransformer:
         return delimiter.join(decoded_tokens[:-1])
 
     def _beam_search(self, z, topk=5, delimiter=''):
-
         z = z.repeat(topk, 0)
 
         final_results = []

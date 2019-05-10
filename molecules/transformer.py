@@ -163,12 +163,10 @@ class DecoderLayer():
 
     def __call__(self, dec_input, enc_output, self_mask=None, enc_mask=None):
         output, slf_attn = self.self_att_layer(dec_input, dec_input, dec_input, mask=self_mask)
-        output = debugPrint(output, "Decoder Self Attention Output")
         output, enc_attn = self.enc_att_layer(output, enc_output, enc_output, mask=enc_mask)
-        output = debugPrint(output, "Decoder Enc-Dec Output")
-        enc_attn = debugPrint(enc_attn, "EncDec-Attn:")
         output = self.pos_ffn_layer(output)
         return output, slf_attn, enc_attn
+
 
 
 def GetPosEncodingMatrix(max_len, d_emb):
@@ -1242,14 +1240,14 @@ class FalseEmbeddingsTD():
         self.l1 = Dense(d_latent, input_shape=(d_latent,), activation='relu')
         self.l2 = Dense(d_latent, input_shape=(d_latent,))
 
-        self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,), activation='sigmoid'))
+        self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,), activation='relu'))
         self.prelayer = TimeDistributed(Dense(d_emb, input_shape=(d_emb,)))
         self.enc_layers = [
             EncoderLayer(d_model=d_emb, d_inner_hid=params["d_inner_hid"], n_head=params["heads"], d_k=params["d_k"],
                          d_v=params["d_v"], dropout=params["dropout"])
             for _ in range(2)]
 
-        #self.final_lin = TimeDistributed(Dense(d_emb, input_shape=(d_emb,)))
+        # self.final_lin = TimeDistributed(Dense(d_emb, input_shape=(d_emb,)))
 
     def __call__(self, z):
         '''
@@ -1268,7 +1266,7 @@ class FalseEmbeddingsTD():
         for layer in self.enc_layers:
             z, _ = layer(z, None)
 
-        return z #self.final_lin(z)
+        return z  # self.final_lin(z)
 
 
 class FalseEmbeddings():
@@ -1279,7 +1277,7 @@ class FalseEmbeddings():
         :param d_emb: dimensionality of false embeddings
         '''
 
-        latent_len = int(np.ceil(d_latent / d_emb))
+        latent_len = max(25,int(np.ceil(d_latent / d_emb)))
         self.init_layer = Dense(d_emb * latent_len, input_shape=(d_latent,))
 
         # self.init_layer = TimeDistributed(Dense(d_emb, input_shape=(1,)))
@@ -1324,15 +1322,10 @@ class FalseEmbeddings():
 
         for (i, layer) in enumerate(self.deep_layers):
             if self.residual:
-                # z = ReLU((WReLU(Wz) + z))
                 z_w = self.deep_res_layers[i](layer(z))
                 z = Add()([z, z_w])
-                z = BatchNormalization()(z)
-                z = ReLU()(z)
-                # z = z + layer(z)
             else:
                 z = layer(z)
-                z = BatchNormalization()(z)
 
         z = self.init_layer(z)
         z = self.final_shape(z)
@@ -1344,12 +1337,9 @@ class FalseEmbeddings():
             if self.residual:
                 z_w = self.deep_res_time_layers[i](layer(z))
                 z = Add()([z, z_w])
-                z = TimeDistributed(BatchNormalization)(z)
-                z = ReLU()(z)
                 # z = z + layer(z)
             else:
                 z = layer(z)
-                z = TimeDistributed(BatchNormalization)(z)
 
         return z
 
@@ -1426,13 +1416,47 @@ class DecoderLayerFiLM():
         output = self.pos_ffn_layer(output)
         return output, slf_attn, enc_attn
 
+class DecoderLayerNoFE():
+    def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v, d_latent, dropout=0.1):
+        self.self_att_layer = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
+        self.enc_att_layer = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
+        self.pos_ffn_layer = PositionwiseFeedForward(d_model, d_inner_hid, dropout=dropout)
 
-class DecoderWithFILM():
-    def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v, d_latent,
+        self.ffn_k = PositionwiseFeedForward(d_latent, d_inner_hid, dropout=dropout)
+        self.ffn_v = PositionwiseFeedForward(d_latent, d_inner_hid, dropout=dropout)
+        self.ffn_h_k = PositionwiseFeedForward(d_model, d_inner_hid, dropout=dropout)
+        self.ffn_h_v = PositionwiseFeedForward(d_model, d_inner_hid, dropout=dropout)
+        # self.film_layer = FiLM(d_latent, d_model)
+
+    def __call__(self, dec_input, enc_output, z_latent, self_mask=None, enc_mask=None):
+        output, slf_attn = self.self_att_layer(dec_input, dec_input, dec_input, mask=self_mask)
+
+        # Sequences for K, V
+        h_v = self.ffn_h_v(dec_input)
+        h_k = self.ffn_h_k(dec_input)
+        z_latent = Lambda(lambda x: K.expand_dims(x, axis=1))(z_latent)
+        z_v = self.ffn_v(z_latent)
+        z_k = self.ffn_k(z_latent)
+
+        rep = Lambda(lambda x: K.repeat(K.squeeze(x, axis=1), K.shape(dec_input)[1]))
+        z_v = Concatenate(axis=2)([rep(z_v), h_v])
+        z_k = Concatenate(axis=2)([rep(z_k), h_k])
+
+        output, enc_attn = self.enc_att_layer(output, z_k, z_v, mask=enc_mask)
+        output = self.pos_ffn_layer(output)
+        return output, slf_attn, enc_attn
+
+
+class DecoderLatent():
+    def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v, d_latent, decoder="TRANSFORMER_FILM",
                  layers=6, dropout=0.1, word_emb=None, pos_emb=None):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
-        self.layers = [DecoderLayerFiLM(d_model, d_inner_hid, n_head, d_k, d_v, d_latent, dropout) for _ in
+        if "FILM" in decoder:
+            self.layers = [DecoderLayerFiLM(d_model, d_inner_hid, n_head, d_k, d_v, d_latent, dropout) for _ in
+                       range(layers)]
+        else:
+            self.layers = [DecoderLayerNoFE(d_model, d_inner_hid, n_head, d_k, d_v, d_latent, dropout) for _ in
                        range(layers)]
 
     def __call__(self, tgt_seq, tgt_pos, src_seq, enc_output, z_latent, return_att=False, active_layers=999):

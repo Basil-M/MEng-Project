@@ -64,16 +64,21 @@ def get_arguments():
                         help='Number of epochs to run during training.')
     parser.add_argument('--batch_size', type=int, metavar='N', default=40,
                         help='Number of samples to process per minibatch during training.')
-    parser.add_argument('--bottleneck', type=str, metavar='N', default="conv",
+    parser.add_argument('--bottleneck', type=str, metavar='N', default="avg",
                         help='Choice of bottleneck')
-    parser.add_argument('--model_size', type=str, metavar='N', default="big",
+    parser.add_argument('--model_size', type=str, metavar='N', default="small",
                         help='Number of samples to process per minibatch during training.')
-    parser.add_argument('--latent_dim', type=int, metavar='N', default=60,
+    parser.add_argument('--latent_dim', type=int, metavar='N', default=96,
                         help='Latent dimension')
     parser.add_argument('--use_WAE', type=bool, metavar='N', default=False,
                         help="Choice to use Normal IMQ WAE with s = 2, weight = 10")
+    parser.add_argument('--decoder', type=str, metavar='N', default = "TRANSFORMER",
+                        help="Can use either standard transformer, FILM or NoFE")
     parser.add_argument('--use_FILM', type=bool, metavar='N', default=False,
                         help="Choice to use FILM layers in decoder")
+    parser.add_argument('--no_FE', type=bool, metavar='N', default=False,
+                        help="Use decoder without false embeddings")
+
     parser.add_argument('--model_folder', type=str, metavar='N', default=None,
                         help="Specify model folder. If specified, all other options are ignored.")
 
@@ -127,9 +132,12 @@ def main():
                                                "WAE" if args.use_WAE else "VAE")
 
         # handle FILM
-        if args.use_FILM:
-            model_name += "_FILM"
-            params["decoder"] += "_FILM"
+        if "FILM" in args.decoder:
+            model_name +="_FILM"
+            params["decoder"] +="_FILM"
+        elif "NoFE" in args.decoder:
+            model_name += "_NoFE"
+            params["decoder"] += "_NoFE"
 
         model_dir = args.models_dir + model_name + "/"
         if not os.path.exists(model_dir):
