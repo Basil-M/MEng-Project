@@ -14,11 +14,11 @@ import pygtrie  # For prefix tree
 
 MAX_NUM_ROWS = 1000
 SMILES_COL_NAME = 'structure'
-DICT_LOC = 'data/SMILES_dict.txt'
+DICT_LOC = 'data/CHEMBL_dict.txt'
 INFILE = 'data/zinc12.h5'
 OUTFILE = 'data/zinc_1k.h5'
 
-from utils import rdkit_funcs, TokenList
+from utils import rdkit_funcs, TokenList, rdkit_funcs_mol
 from rdkit import Chem
 
 
@@ -50,7 +50,7 @@ def get_arguments():
 
 def main():
     args = get_arguments()
-
+    np.random.seed(1830)
     print("Loading data from", args.infile)
     data = pandas.read_hdf(args.infile, 'table')
 
@@ -75,8 +75,10 @@ def main():
         del canon_struct_tree
  
     keys = data[args.smiles_column].map(len) < args.max_len + 1
-    if args.length <= len(keys):
-        data = data[keys].sample(n=args.length)
+    n_samples = int(1.1*args.length)
+    if n_samples <= len(keys):
+        # sample an extra 10% to allow for some unwieldy smiles
+        data = data[keys].sample(n=int(n_samples))
     else:
         data = data[keys]
 
@@ -111,6 +113,8 @@ def main():
             charset = list(ll for ll in fin.read().split('\n') if ll != "")
     else:
         charset = list(reduce(lambda x, y: set(y) | x, structures, set()))
+        print(charset)
+        return (0,0)
     # Explicitly encode so it can be saved in h5 file
     # PREPROCESSING FOR TRANSFORMER MODEL
     print("Fetching", args.length, "canonicalised strings from dataset")
@@ -120,18 +124,21 @@ def main():
     with progressbar.ProgressBar(maxval=args.length, widgets=widgets) as bar:
         train_str = []
         test_str = []
-        for (idx, lst) in zip([train_idx, test_idx], [train_str, test_str]):
+        n_samples = (args.length*np.array([args.train_frac, 1 - args.train_frac])).astype(np.int)
+        for (idx, lst, ns) in zip([train_idx, test_idx], [train_str, test_str], n_samples):
             # canonicalise
             for (i, id) in enumerate(idx):
+                if len(lst) == ns:
+                    break
                 mol = ''.join(structures[id])
                 rd_mol = Chem.MolFromSmiles(mol)
                 if rd_mol:
                     lst.append(Chem.MolToSmiles(rd_mol))
+                    bar_i += 1
                 else:
                     print("Could not canonicalise molecule", i)
-                    lst.append(mol)
+#                    lst.append(mol)
 
-                bar_i += 1
                 bar.update(bar_i)
     # Split testing and training data
     # TODO(Basil): Fix ugly hack with the length of Xs...
