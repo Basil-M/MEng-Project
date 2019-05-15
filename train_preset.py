@@ -78,9 +78,13 @@ def get_arguments():
                         help="Choice to use FILM layers in decoder")
     parser.add_argument('--no_FE', type=bool, metavar='N', default=False,
                         help="Use decoder without false embeddings")
+    parser.add_argument('--pweight', type=float, metavar='N', default=1.25,
+                        help="Property predictor weight")
 
     parser.add_argument('--model_folder', type=str, metavar='N', default=None,
                         help="Specify model folder. If specified, all other options are ignored.")
+    parser.add_argument('--use_TD', type=bool, metavar='N', default=False,
+                        help="Choice to use time distributed false embeddings")
 
     # attention params
     parser.add_argument('--heads', type=int, metavar='N', default=4,
@@ -132,12 +136,18 @@ def main():
                                                "WAE" if args.use_WAE else "VAE")
 
         # handle FILM
-        if "FILM" in args.decoder:
+        if "FILM" in args.decoder or args.use_FILM:
             model_name +="_FILM"
             params["decoder"] +="_FILM"
         elif "NoFE" in args.decoder:
             model_name += "_NoFE"
             params["decoder"] += "_NoFE"
+        if "chembl" in args.data:
+            model_name+="_CBL"
+
+        params["pp_weight"] = args.pweight
+        if not args.pweight == 1.25:
+            model_name +="_p" + str(int(args.pweight))
 
         model_dir = args.models_dir + model_name + "/"
         if not os.path.exists(model_dir):
@@ -258,7 +268,7 @@ def main():
 
         if args.use_WAE:
             params["WAE_kernel"] = "IMQ_normal"
-            params["kl_max_weight"] = 10
+            params["kl_max_weight"] = 5
             params["WAE_s"] = 2
 
         # Handle interim decoder parameters
@@ -301,6 +311,7 @@ def main():
     num_seeds = 400
     num_decodings = 10
     num_prior_samples = 1000
+    np.random.seed(1337)
     with supress_stderr():
         seed_output = property_distributions(data_test, props_test,
                                              num_seeds=num_seeds,

@@ -1270,7 +1270,7 @@ class FalseEmbeddingsTD():
 
 
 class FalseEmbeddings():
-    def __init__(self, d_emb, d_latent, residual=True, layers=0):
+    def __init__(self, d_emb, d_latent, residual=True, layers=1):
         '''
         Given a 1D vector, attempts to create 'false' embeddings to
         go from latent space
@@ -1337,7 +1337,6 @@ class FalseEmbeddings():
             if self.residual:
                 z_w = self.deep_res_time_layers[i](layer(z))
                 z = Add()([z, z_w])
-                # z = z + layer(z)
             else:
                 z = layer(z)
 
@@ -1442,7 +1441,7 @@ class DecoderLayerNoFE():
         z_v = Concatenate(axis=2)([rep(z_v), h_v])
         z_k = Concatenate(axis=2)([rep(z_k), h_k])
 
-        output, enc_attn = self.enc_att_layer(output, z_k, z_v, mask=enc_mask)
+        output, enc_attn = self.enc_att_layer(output, z_k, z_v, mask=self_mask)
         output = self.pos_ffn_layer(output)
         return output, slf_attn, enc_attn
 

@@ -154,7 +154,6 @@ class TriTransformer:
             dec_word_emb = self.word_emb
             dec_pos_emb = pos_emb
 
-        # False embedder
         if "NoFE" in self.p["decoder"]:
             self.false_embedder = None
         elif "TD" in self.p["decoder"]:
@@ -294,7 +293,7 @@ class TriTransformer:
         loss = Lambda(tf.reduce_sum)(losses)
 
         # Set up autoencoder model
-        if self.p["pp_weight"] is None:
+        if not self.p["pp_weight"]:
             self.autoencoder = Model([src_seq, tgt_seq_in], loss)
         else:
             self.autoencoder = Model([src_seq, tgt_seq_in, prop_input], loss)
@@ -487,7 +486,6 @@ class TriTransformer:
                                          2 * expected_rbf(mu, var, prior_mu, prior_var))
 
     def get_moments(self, input):
-        print("Getting moments for input", input)
         if isinstance(input, str):
             # have been given a string
             input_seq = self.i_tokens.tokenize(input)
