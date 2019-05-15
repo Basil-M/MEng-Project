@@ -108,13 +108,14 @@ class TriTransformer:
                                          latent_dim=self.p["latent_dim"],
                                          attn=("attn" in self.p["bottleneck"]),
                                          word_emb=self.word_emb)
-        elif self.p["bottleneck"] == "conv":
+        elif "conv" in self.p["bottleneck"]:
             self.encoder = tr.ConvEncoder(layers=self.p["ID_layers"],
                                           min_filt_size=self.p["ID_d_k"],
                                           min_filt_num=self.p["ID_d_k"],
                                           latent_dim=self.p["latent_dim"],
                                           dense_dim=self.p["ID_d_model"],
-                                          word_emb=self.word_emb)
+                                          word_emb=self.word_emb,
+                                          use_attn=("attn" in self.p["bottleneck"]))
         else:
             self.use_src_pos = True
             self.encoder = TransformerEncoder(params=params, tokens=i_tokens,
@@ -273,12 +274,9 @@ class TriTransformer:
         # VARIATIONAL LOSS
         if self.kl_loss_var is not None:
             if self.p["WAE_s"] == 0 or self.p["WAE_kernel"] is None:
-                print("Using variational autoencoder")
                 kl = Lambda(kl_loss, name='VariationalLoss')([z_mean, z_logvar])
             else:
                 kl = Lambda(self.mmd_penalty, name='WAELoss')(z_sampled)
-                self.metrics["wae"] = Lambda(self.wae_mmd_exact, name='VariationalLoss')(
-                    [z_mean, z_logvar])
             kl = Lambda(lambda x: self.kl_loss_var * x)(kl)
             self.metrics["kl_loss"] = kl
             losses.append(kl)

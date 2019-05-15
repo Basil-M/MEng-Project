@@ -320,7 +320,7 @@ class KQV_Attn():
     def __call__(self, x):
         key = self.keys(x)
         if self.scale_key:
-            key /= np.sqrt(self.d)
+            key = Lambda(lambda x: x/np.sqrt(self.d))(key)
 
         query = self.queries(x)
         value = self.values(x)
@@ -443,7 +443,7 @@ class AvgLatent3():
 
 
 class ConvEncoder():
-    def __init__(self, layers, min_filt_size, min_filt_num, latent_dim, dense_dim, word_emb):
+    def __init__(self, layers, min_filt_size, min_filt_num, latent_dim, dense_dim, word_emb,use_attn=False):
         self.word_emb = word_emb
         self.layers = []
         for i in range(layers):
@@ -451,7 +451,12 @@ class ConvEncoder():
             n = min_filt_num + i
             self.layers.append(Convolution1D(d, n, activation='relu'))
 
-        self.after = Dense(dense_dim, activation='relu')
+        if use_attn:
+            self.after = TimeDistributed(Dense(latent_dim, activation='relu'))
+            self.KQV = KQV_Attn(latent_dim,latent_dim,scale_key=True)
+        else:
+            self.after = Dense(dense_dim, activation='relu')
+            self.KQV = None
         self.mean_layer = Dense(latent_dim, name='z_mean')
         self.logvar_layer = Dense(latent_dim, name='z_logvar')
 
@@ -460,8 +465,12 @@ class ConvEncoder():
         for layer in self.layers:
             h = layer(h)
 
-        h = Flatten(name='flatten_1')(h)
-        h = self.after(h)
+        if self.KQV:
+            h = self.after(h)
+            h = self.KQV(h)
+        else:
+            h = Flatten(name='flatten_1')(h)
+            h = self.after(h)
         return self.mean_layer(h), self.logvar_layer(h), None
 
 
@@ -748,20 +757,16 @@ class InterimDecoder2():
         self.d_model = d_model
         self.layers = [DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout) for _ in range(layers)]
         self.width = decoder_width
-
         # Calculate 'decoder_width' means/variances from output
         # self.mean_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_mean_layer')
         # self.logvar_layer = TimeDistributed(Dense(1, input_shape=(d_model,)), name='ID2_logvar_layer')
-        self.mean_layer = Dense(self.latent_dim, input_shape=(self.latent_dim * d_model,), name='ID2_mean_layer')
-        self.logvar_layer = Dense(self.latent_dim, input_shape=(self.latent_dim * d_model,), name='ID2_logvar_layer')
+        self.mean_layer = Dense(self.latent_dim, input_shape=(self.width * d_model,), name='ID2_mean_layer', activation='relu')
+        self.logvar_layer = Dense(self.latent_dim, input_shape=(self.width * d_model,), name='ID2_logvar_layer', activation='relu')
         self.mean_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_mean_layer2')
         self.logvar_layer2 = Dense(self.latent_dim, input_shape=(self.latent_dim,), name='ID2_logvar_layer2')
-        # For the very first vector
-        self.attn = TimeDistributed(Dense(self.width, input_shape=(d_model,), activation='linear'), name='ID2_ATTN')
-
         self.squeeze = Lambda(lambda x: K.squeeze(x, axis=-1), name='ID2_SQUEEZE')
 
-        self.ldim = K.constant(latent_dim, dtype='int32')
+        self.ldim = K.constant(self.width, dtype='int32')
         self.concat = Concatenate(axis=1, name='ID2_CONCAT')
 
     def __call__(self, src_seq, enc_output):
@@ -784,8 +789,8 @@ class InterimDecoder2():
                                                                enc_output.get_shape()], name='ID2_LOOP')
 
             # will generate too many latent dimensions, so clip it
-            z_embedded = z_embedded[:, :self.latent_dim, :]
-            return K.reshape(z_embedded, [-1, self.latent_dim * self.d_model])
+            z_embedded = z_embedded[:, :self.width, :]
+            return K.reshape(z_embedded, [-1, self.width * self.d_model])
 
         z_emb = Lambda(the_loop)(z_init)
         means = self.mean_layer(z_emb)
@@ -800,17 +805,13 @@ class InterimDecoder2():
         z = z_so_far
 
         # Positional embedding
-        # z_pos = Lambda(self.get_pos_seq)(z_so_far)
-        # z_pos = self.pos_layer(z_pos)
-        # z = Add()([z, z_pos])
+        z_pos = Lambda(self.get_pos_seq)(z_so_far)
+        z_pos = self.pos_layer(z_pos)
+        z = Add()([z, z_pos])
 
-        # Mask the encoder output
-        self_mask = None
-        enc_mask = None
-        # enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([z_so_far, src_seq])
         # Run through interim decoder
         for dec_layer in self.layers:
-            z, self_att, enc_att = dec_layer(z, enc_output, self_mask, enc_mask)
+            z, self_att, enc_att = dec_layer(z, enc_output, None, None)
 
         return z
 
@@ -825,8 +826,8 @@ class InterimDecoder2():
         '''
 
         z_i = self.compute_next_z(z_so_far, src_seq, enc_output)
-        s = Lambda(lambda x: x[:, -self.width:, :], name='ID2_LOOPSTRIDE')
-        s2 = Lambda(lambda x: K.reshape(x, [-1, self.width, self.d_model]), name='ID2_LOOPSHAPE')
+        s = Lambda(lambda x: x[:, -1, :], name='ID2_LOOPSTRIDE')
+        s2 = Lambda(lambda x: K.reshape(x, [-1, 1, self.d_model]), name='ID2_LOOPSHAPE')
         z_i = s2(s(z_i))
         z = self.concat([z_so_far, z_i])
 
@@ -834,9 +835,17 @@ class InterimDecoder2():
 
     def first_iter(self, src_seq, enc_output, return_att=False, active_layers=999):
         # We generate the first [width] vectors using a weighted average of the encoder output
-        a_vals = self.attn(enc_output)
-        a_vals = Softmax(axis=1)(a_vals)
-        h = Dot(axes=1)([a_vals, enc_output])
+
+        def gen_zeros(sample_vec):
+            batch_size = K.shape(sample_vec)[0]
+            z0 = tf.keras.backend.random_normal([batch_size, 1, self.d_model], mean=0.0, stddev=0.01,
+                                                dtype='float')
+
+            # z0 = K.reshape(z0, shape=[batch_size, -1])
+            return z0
+
+        # initialise
+        h = Lambda(gen_zeros, name='z_zero')(enc_output)
 
         # h is now [batch_size, width, d_model]
         # The code in "step" must be run at least once
@@ -850,9 +859,9 @@ class InterimDecoder2():
         return tf.less(K.shape(z_so_far)[1], self.ldim)
 
     def get_pos_seq(self, x):
-        mask = K.cast(K.not_equal(x, 0), 'int32')
-        pos = K.cumsum(K.ones_like(x, 'int32'), 1)
-        return pos * mask
+        s = K.shape(x)
+        pos = K.cumsum(K.ones([s[0], s[2]], 'int32'), 1)
+        return pos
 
 
 class InterimDecoder3():
@@ -915,16 +924,6 @@ class InterimDecoder3():
         # z_pos = Lambda(self.get_pos_seq)(z_so_far)
         # z_pos = self.pos_layer(z_pos)
         # z = Add()([z, z_pos])
-
-        # Mask the output
-        # self_pad_mask = Lambda(lambda x: GetPadMask(x, x))(z_so_far)
-        # self_sub_mask = Lambda(GetSubMask)(z_so_far)
-        # self_mask = Lambda(lambda x: K.minimum(x[0], x[1]))([self_pad_mask, self_sub_mask])
-
-        # if return_att: self_atts, enc_atts = [], []
-        # self_mask = None
-
-        # enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]))([z_so_far, src_seq])
 
         # Run through interim decoder
         for dec_layer in self.layers:
@@ -1422,6 +1421,8 @@ class DecoderLayerNoFE():
         self.enc_att_layer = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
         self.pos_ffn_layer = PositionwiseFeedForward(d_model, d_inner_hid, dropout=dropout)
 
+        # self.ffn_k = PositionwiseFeedForward(d_latent, d_inner_hid, dropout=dropout)
+        # self.ffn_v = PositionwiseFeedForward(d_latent, d_inner_hid, dropout=dropout)
         self.ffn_k = PositionwiseFeedForward(d_latent, d_inner_hid, dropout=dropout)
         self.ffn_v = PositionwiseFeedForward(d_latent, d_inner_hid, dropout=dropout)
         self.ffn_h_k = PositionwiseFeedForward(d_model, d_inner_hid, dropout=dropout)
@@ -1470,9 +1471,8 @@ class DecoderLatent():
         self_mask = Lambda(lambda x: K.minimum(x[0], x[1]), name='DecoderSelfMask')([self_pad_mask, self_sub_mask])
 
         # Don't want encoder mask as there should be no padding from latent dim
-        enc_mask = None
-        # Lambda(lambda x: GetPadMask(x[0], x[1]), name='DecoderEncMask')([tgt_seq, src_seq])
-
+        #enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]), name='DecoderEncMask')([tgt_seq, src_seq])
+        enc_mask = self_mask
         if return_att: self_atts, enc_atts = [], []
 
         for dec_layer in self.layers[:active_layers]:
