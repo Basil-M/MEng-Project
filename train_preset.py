@@ -48,7 +48,8 @@ mnames = {"average1": "AVG1",
           "ar_slim": "ARslim",
           "gru_attn": "GRUa",
           "gru": "GRU",
-          "conv": "CONV"}
+          "conv": "CONV",
+          "conv_attn": "CONVa"}
 
 
 def get_arguments():
@@ -64,9 +65,9 @@ def get_arguments():
                         help='Number of epochs to run during training.')
     parser.add_argument('--batch_size', type=int, metavar='N', default=40,
                         help='Number of samples to process per minibatch during training.')
-    parser.add_argument('--bottleneck', type=str, metavar='N', default="avg",
+    parser.add_argument('--bottleneck', type=str, metavar='N', default="conv_attn",
                         help='Choice of bottleneck')
-    parser.add_argument('--model_size', type=str, metavar='N', default="small",
+    parser.add_argument('--model_size', type=str, metavar='N', default="medium",
                         help='Number of samples to process per minibatch during training.')
     parser.add_argument('--latent_dim', type=int, metavar='N', default=96,
                         help='Latent dimension')
@@ -150,6 +151,7 @@ def main():
             model_name +="_p" + str(int(args.pweight))
 
         model_dir = args.models_dir + model_name + "/"
+
         if not os.path.exists(model_dir):
             os.mkdir(model_dir)
         params["model"] = model_name
@@ -192,7 +194,7 @@ def main():
             elif params["bottleneck"] == "gru_attn":
                 params["ID_layers"] = 3
                 params["ID_d_model"] = 42
-            elif params["bottleneck"] == "conv":
+            elif "conv" in params["bottleneck"]:
                 params["ID_layers"] = 2  # num layers
                 params["ID_d_k"] = 5  # min_filt_size/num
                 params["ID_d_model"] = 64  # dense dim
@@ -204,6 +206,7 @@ def main():
             # GRU_ATTN: 171308
             # CONV:     171800
             # AR_SLIM:  184968
+            # AR2:
             params["d_model"] = 64
             params["d_inner_hid"] = 256
             params["d_k"] = 8
@@ -218,10 +221,18 @@ def main():
                 params["ID_d_k"] = 4
                 params["ID_d_v"] = 4
                 params["ID_heads"] = 4
-            elif "ar" in params["bottleneck"]:
+            elif params["bottleneck"] == "ar2":
+                params["ID_layers"] = 3
+                params["ID_d_model"] = 24
+                params["ID_width"] = 8
+                params["ID_d_inner_hid"] = 196
+                params["ID_d_k"] = 6
+                params["ID_d_v"] = 6
+                params["ID_heads"] = 4
+            elif params["bottleneck"] == "ar_log":
                 params["ID_layers"] = 2
                 params["ID_d_model"] = 32
-                params["ID_width"] = 4
+                params["ID_width"] = 10
                 params["ID_d_inner_hid"] = 196
                 params["ID_d_k"] = 7
                 params["ID_d_v"] = 7
@@ -232,7 +243,7 @@ def main():
             elif params["bottleneck"] == "gru":
                 params["ID_layers"] = 4
                 params["ID_d_model"] = 82
-            elif params["bottleneck"] == "conv":
+            elif "conv" in params["bottleneck"]:
                 params["ID_layers"] = 4
                 params["ID_d_k"] = 8
                 params["ID_d_model"] = 156
@@ -259,7 +270,7 @@ def main():
             elif "gru" in params["bottleneck"]:
                 params["ID_layers"] = 5
                 params["ID_d_model"] = 196
-            elif params["bottleneck"] == "conv":
+            elif "conv" in  params["bottleneck"]:
                 params["ID_layers"] = 5
                 params["ID_d_k"] = 8
                 params["ID_d_model"] = 756
@@ -300,6 +311,7 @@ def main():
 
             params = loaded_params
 
+    params.dump()
     model, results = trainTransformer(params=params, data_file=args.data,
                                       model_dir=model_dir)
 
@@ -308,6 +320,7 @@ def main():
                                                              params["pp_weight"])
     props_train, props_test, prop_labels = utils.load_properties(args.data)
 
+    np.random.seed(1337)
     num_seeds = 400
     num_decodings = 10
     num_prior_samples = 1000
