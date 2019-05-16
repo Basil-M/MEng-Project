@@ -453,7 +453,8 @@ class ConvEncoder():
 
         if use_attn:
             self.after = TimeDistributed(Dense(latent_dim, activation='relu'))
-            self.KQV = KQV_Attn(latent_dim,latent_dim,scale_key=True)
+            #self.KQV = KQV_Attn(latent_dim,latent_dim,scale_key=True)
+            self.KQV = Multihead_Attn(latent_dim,latent_dim,8)
         else:
             self.after = Dense(dense_dim, activation='relu')
             self.KQV = None
@@ -464,14 +465,18 @@ class ConvEncoder():
         h = self.word_emb(x)
         for layer in self.layers:
             h = layer(h)
+            if self.KQV:
+                h = Dropout(0.2)(h)
 
         if self.KQV:
             h = self.after(h)
-            h = self.KQV(h)
+            mean, logvar = self.KQV(h)
         else:
             h = Flatten(name='flatten_1')(h)
             h = self.after(h)
-        return self.mean_layer(h), self.logvar_layer(h), None
+            mean = self.mean_layer(h)
+            logvar = self.logvar_layer(h)
+        return mean, logvar, None
 
 
 class GRUEncoder():

@@ -117,7 +117,11 @@ def main():
         params["stddev"] = 1
         params["decoder"] = "TRANSFORMER"
         params["latent_dim"] = args.latent_dim
-
+        if args.use_WAE:
+            params["WAE_kernel"] = "IMQ_normal"
+            params["kl_max_weight"] = 10
+            params["WAE_s"] = 2
+        w_str = "WAE_s"+str(int(params["kl_max_weight"]))
         # handle attention bottleneck
         if params["bottleneck"] == "avg" or params["bottleneck"] == "sum":
             model_name = params["bottleneck"]
@@ -131,10 +135,10 @@ def main():
             model_name += "-" + args.attn_mech
 
             model_name = "{}_{}_d{}_{}".format(model_name, args.model_size, args.latent_dim,
-                                               "WAE" if args.use_WAE else "VAE")
+                                               w_str if args.use_WAE else "VAE")
         else:
             model_name = "{}_{}_d{}_{}".format(mnames[args.bottleneck], args.model_size, args.latent_dim,
-                                               "WAE" if args.use_WAE else "VAE")
+                                               w_str if args.use_WAE else "VAE")
 
         # handle FILM
         if "FILM" in args.decoder or args.use_FILM:
@@ -276,11 +280,6 @@ def main():
                 params["ID_d_model"] = 756
 
         params["d_v"] = params["d_k"]
-
-        if args.use_WAE:
-            params["WAE_kernel"] = "IMQ_normal"
-            params["kl_max_weight"] = 5
-            params["WAE_s"] = 2
 
         # Handle interim decoder parameters
         params.setIDparams()

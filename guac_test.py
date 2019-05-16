@@ -12,7 +12,7 @@ from rdkit import Chem
 
 from dataloader import SmilesToArray
 from train import trainTransformer
-from utils import rdkit_funcs, TokenList, AttnParams
+from utils import rdkit_funcs, TokenList, AttnParams, rdkit_funcs_mol
 
 # GuacaMol Data Links
 urls = {
@@ -23,8 +23,9 @@ urls = {
 
 # Path to charset
 dict = 'data/guac_dict.txt'
-
-
+d_file = 'guac.h5'
+train_len = 300000
+test_len = 25000
 def preprocess_guac_data(folder):
     # Get character set
     with open(dict) as fin:
@@ -36,19 +37,26 @@ def preprocess_guac_data(folder):
             urlretrieve(urls[key], folder + "/guac_" + key + ".smiles")
     # Explicitly encode so it can be saved in h5 file
     # Preprocessing
-    if not exists(folder + '/guac.h5'):
+    if not exists(folder + '/' + d_file):
         print("Could not find prepared h5 file of guac data. Preprocessing.")
         canon = lambda x: x
-        #canon = lambda x: Chem.MolToSmiles(Chem.MolFromSmiles(x))
+        canon = lambda x: Chem.MolToSmiles(Chem.MolFromSmiles(x))
         print("Loading and canonicalizing guacaMolecules")
         with open(folder + '/guac_test.smiles') as fin:
             test_str = [ll for ll in fin.read().split('\n') if ll != ""]
         with open(folder + '/guac_train.smiles') as fin:
             train_str = [ll for ll in fin.read().split('\n') if ll != ""]
 
+        # keep random data
+        np.random.shuffle(test_str)
+        np.random.shuffle(train_str)
+        test_str = test_str[0:test_len]
+        train_str = train_str[0:train_len]
+        test_mol = [Chem.MolFromSmiles(x) for x in test_str]
+        train_mol = [Chem.MolFromSmiles(x) for x in train_str]
         # Split testing and training data
         print("Creating categorical SMILES arrays")
-        h5f = h5py.File(folder + "guac.h5", 'w')
+        h5f = h5py.File(folder + d_file, 'w')
         tokens = TokenList(charset)
         transformer_train = SmilesToArray(train_str, tokens, length=110)
         transformer_test = SmilesToArray(test_str, tokens, length=110)
@@ -60,13 +68,13 @@ def preprocess_guac_data(folder):
         # Create data for GRU and pad to max length
         # bs x ml x 38
         print("Creating onehot arrays")
-        onehot_train = to_categorical(transformer_train, tokens.num())
-        onehot_test = to_categorical(transformer_test, tokens.num())
-        mlen = np.max([110, np.shape(onehot_train)[1], np.shape(onehot_test)[1]])
-        onehot_train = np.pad(onehot_train, ((0, 0), (0, mlen - np.shape(onehot_train)[1]), (0, 0)), 'constant')
-        onehot_test = np.pad(onehot_test, ((0, 0), (0, mlen - np.shape(onehot_test)[1]), (0, 0)), 'constant')
-        h5f.create_dataset('onehot/train', data=onehot_train)
-        h5f.create_dataset('onehot/test', data=onehot_test)
+#        onehot_train = to_categorical(transformer_train, tokens.num())
+#        onehot_test = to_categorical(transformer_test, tokens.num())
+#        mlen = np.max([110, np.shape(onehot_train)[1], np.shape(onehot_test)[1]])
+#        onehot_train = np.pad(onehot_train, ((0, 0), (0, mlen - np.shape(onehot_train)[1]), (0, 0)), 'constant')
+#        onehot_test = np.pad(onehot_test, ((0, 0), (0, mlen - np.shape(onehot_test)[1]), (0, 0)), 'constant')
+#        h5f.create_dataset('onehot/train', data=onehot_train)
+#        h5f.create_dataset('onehot/test', data=onehot_test)
 
         # PROPERTIES
         test_props = []
@@ -78,11 +86,11 @@ def preprocess_guac_data(folder):
         for prop in rdkit_funcs:
             print("\tComputing", prop)
             if len(test_props):
-                test_props = np.vstack((test_props, p([rdkit_funcs[prop](s) for s in test_str])))
-                train_props = np.vstack((train_props, p([rdkit_funcs[prop](s) for s in train_str])))
+                test_props = np.vstack((test_props, p([rdkit_funcs_mol[prop](s) for s in test_mol])))
+                train_props = np.vstack((train_props, p([rdkit_funcs_mol[prop](s) for s in train_mol])))
             else:
-                test_props = p([rdkit_funcs[prop](s) for s in test_str])
-                train_props = p([rdkit_funcs[prop](s) for s in train_str])
+                test_props = p([rdkit_funcs_mol[prop](s) for s in test_mol])
+                train_props = p([rdkit_funcs_mol[prop](s) for s in train_mol])
 
             prop_names.append(prop)
 
@@ -110,18 +118,31 @@ def main():
     preprocess_guac_data('data/')
 
     # define model
-    params = defaultParams('medium','avg',8,'KQV',latent_dim=96)
-    model_fol = 'models/GUAC-' + params['model']
+    params = defaultParams('big','conv_attn',8,'KQV',latent_dim=96)
+#    params["decoder"] = "TRANSFORMER_NoFE"
+#    params["model"] += "_NoFE"
+    params["epochs"] = 30
+    # huge model
+    params["AM_softmax"] = False
+    model_fol = 'guac/GUAC-' + params['model'] + '/'
     if not exists(model_fol):
         mkdir(model_fol)
+    else:
+        print("Loading model.")
+        params.load(model_fol + "params.pkl")
     params['model'] = model_fol
 
-    model, results = trainTransformer(params=params, data_file='data/guac.h5',
+    print("model for guac:", model_fol)
+    model, results = trainTransformer(params=params, data_file='data/'+d_file,
                                       model_dir=model_fol)
 
-    Gen = TransformerDMG(model, 5, 5)
+    bw = 5
+    Gen = TransformerDMG(model, bw, 5)
     assess_distribution_learning(Gen, 'data/guac_train.smiles',
-                                 model_fol + '/results_bw{}_npz{}.json'.format(5, 5))
+                                 model_fol + '/results_bw{}_npz{}.json'.format(bw, 5))
+    Gen = TransformerDMG(model, bw, 1)
+    assess_distribution_learning(Gen, 'data/guac_train.smiles',
+                                 model_fol + '/results_bw{}_npz{}.json'.format(bw, 1))
 
 
 class TransformerDMG(DistributionMatchingGenerator):
@@ -132,8 +153,10 @@ class TransformerDMG(DistributionMatchingGenerator):
         self.ldim = model.p["latent_dim"]
 
     def generate(self, number_samples: int):
+        print("Generating", number_samples, "samples.")
         out = []
         while len(out) < number_samples:
+            print("\tGenerated",len(out),"samples.")
             z_i = np.random.randn(self.ldim)
             out_i = []
             s = self.model.decode_from_sample(z_i, beam_width=self.bw)

@@ -19,7 +19,7 @@ def defaultParams(model_size='medium', bottleneck='avg', attn_heads=8, attn_mech
             model_name += "-mh" + str(attn_heads)
 
             params["AM_type"] = attn_mech
-            model_name += "-" + attn_mech
+            model_name += "-" + attn_mech + "_" + model_size
     else:
         model_name = bottleneck + "_" + model_size
 
@@ -71,7 +71,7 @@ def defaultParams(model_size='medium', bottleneck='avg', attn_heads=8, attn_mech
         elif params["bottleneck"] == "gru_attn":
             params["ID_layers"] = 3
             params["ID_d_model"] = 42
-        elif params["bottleneck"] == "conv":
+        elif "conv" in params["bottleneck"]:
             params["ID_layers"] = 2  # num layers
             params["ID_d_k"] = 5  # min_filt_size/num
             params["ID_d_model"] = 64  # dense dim
@@ -111,7 +111,7 @@ def defaultParams(model_size='medium', bottleneck='avg', attn_heads=8, attn_mech
         elif params["bottleneck"] == "gru":
             params["ID_layers"] = 4
             params["ID_d_model"] = 82
-        elif params["bottleneck"] == "conv":
+        elif "conv" in params["bottleneck"]:
             params["ID_layers"] = 4
             params["ID_d_k"] = 8
             params["ID_d_model"] = 156
@@ -138,7 +138,7 @@ def defaultParams(model_size='medium', bottleneck='avg', attn_heads=8, attn_mech
         elif "gru" in params["bottleneck"]:
             params["ID_layers"] = 5
             params["ID_d_model"] = 196
-        elif params["bottleneck"] == "conv":
+        elif "conv" in params["bottleneck"]:
             params["ID_layers"] = 5
             params["ID_d_k"] = 8
             params["ID_d_model"] = 756

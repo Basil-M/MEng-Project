@@ -227,6 +227,7 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
                                                max_val=params["kl_max_weight"],
                                                init_epochs=params["kl_pretrain_epochs"]))
             elif c == "epoch_track":
+                print("Epoch track with folder", model_dir+"params.pkl")
                 callbacks.append(epoch_track(params, param_filename=model_dir + "params.pkl", csv_track=True))
 
         cb.append(LRSchedulerPerStep(params["d_model"],
