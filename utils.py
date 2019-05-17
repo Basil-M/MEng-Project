@@ -511,16 +511,27 @@ class TokenList:
 
     def tokenize(self, input_str):
         '''
-        Given a string input sequence will return a tokenised sequence
+     s =   Given a string input sequence will return a tokenised sequence
         :param input_str:
         :return:
         '''
         if isinstance(input_str, str):
             src_seq = np.zeros((1, len(input_str) + 3), dtype='int32')
             src_seq[0, 0] = self.startid()
+            skipnext = False
+            j = 1
             for i, z in enumerate(input_str):
-                src_seq[0, 1 + i] = self.id(z)
-            src_seq[0, len(input_str) + 1] = self.endid()
+                if skipnext:
+                    skipnext = False
+                elif input_str[i:i+2] in self.t2id:
+                    skipnext = True
+                    src_seq[0, j] = self.id(input_str[i:i+2])
+                    j+=1
+                else:
+                    src_seq[0, j] = self.id(z)
+                    j+=1
+            src_seq[0, j] = self.endid()
+            src_seq = src_seq[:, 0:j+1]
         else:
             src_seq = np.expand_dims(input_str, 0)
 
