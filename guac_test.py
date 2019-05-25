@@ -144,6 +144,22 @@ def main():
     assess_distribution_learning(Gen, 'data/guac_train.smiles',
                                  model_fol + '/results_bw{}_npz{}.json'.format(bw, 1))
 
+def RandomSampler():
+    train_file = 'data/guac_train.smiles'
+
+class RandomDMG(DistributionMatchingGenerator):
+    def __init__(self, data, tokens):
+        self.data = data
+        self.tokens = tokens
+        self.get_chem = lambda k: ''.join([tokens.id2t[s] for s in self.data[k] if s >=4])
+        self.dlen = len(data)
+
+    def generate(self, number_samples: int):
+        ind = np.array(range(self.dlen))
+        np.random.shuffle(ind)
+        inds = np.random.randint(self.dlen,size=(number_samples,))
+        return [self.get_chem(i) for i in inds]
+
 
 class TransformerDMG(DistributionMatchingGenerator):
     def __init__(self, model, beam_width=5, num_per_beam=5):
@@ -154,9 +170,10 @@ class TransformerDMG(DistributionMatchingGenerator):
 
     def generate(self, number_samples: int):
         print("Generating", number_samples, "samples.")
+        return ['C'] * number_samples
+
         out = []
         while len(out) < number_samples:
-            print("\tGenerated",len(out),"samples.")
             z_i = np.random.randn(self.ldim)
             out_i = []
             s = self.model.decode_from_sample(z_i, beam_width=self.bw)

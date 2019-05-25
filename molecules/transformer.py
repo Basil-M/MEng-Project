@@ -309,13 +309,14 @@ class SumLatent2():
 
 
 class KQV_Attn():
-    def __init__(self, d_in, d_out, activation='linear', use_softmax=True, scale_key=False):
+    def __init__(self, d_in, d_out, activation='linear', use_softmax=True, scale_key=False, return_att=False):
         self.keys = TimeDistributed(Dense(d_out, input_shape=(d_in,), activation=activation))
         self.queries = TimeDistributed(Dense(d_out, input_shape=(d_out,), activation=activation))
         self.values = TimeDistributed(Dense(d_out, input_shape=(d_out,), activation=activation))
         self.softmax = use_softmax
         self.scale_key = scale_key
         self.d = d_in
+        self.return_attn = return_att
 
     def __call__(self, x):
         key = self.keys(x)
@@ -329,8 +330,10 @@ class KQV_Attn():
             attn = Softmax()(attn)
 
         outp = Lambda(lambda x: K.batch_dot(x[0], x[1], axes=(1, 1)))([attn, value])
-
-        return outp
+        if self.return_attn:
+            return outp, attn
+        else:
+            return outp
 
 
 class Additive_Attn():
@@ -386,10 +389,10 @@ class Additive_Attn():
 #         return mean, logvar
 
 class Multihead_Attn():
-    def __init__(self, d_model, latent_dim, heads=4, attn_mechanism="KQV", use_softmax=True):
+    def __init__(self, d_model, latent_dim, heads=4, attn_mechanism="KQV", use_softmax=True, return_attn = False):
         d_kqv = int(np.ceil(d_model / heads))
         if attn_mechanism == "KQV":
-            self.attns = [KQV_Attn(d_model, d_kqv, activation='linear') for _ in range(heads)]
+            self.attns = [KQV_Attn(d_model, d_kqv, activation='linear',return_att=return_attn) for _ in range(heads)]
         else:
             self.attns = [Additive_Attn(d_model, d_kqv, activation='linear') for _ in range(heads)]
 
@@ -401,10 +404,20 @@ class Multihead_Attn():
             self.prelogvar_layer = Dense(latent_dim, input_shape=(latent_dim,), activation='tanh', name='prelogvar')
         else:
             self.prelogvar_layer = None
+        self.return_att = return_attn
 
     def __call__(self, encoder_output):
         # encoder output should be [batch size, length, d_model]
-        h = [layer(encoder_output) for layer in self.attns]
+        if self.return_att:
+            h = []
+            attns = []
+            for layer in self.attns:
+                h_i, attn_i = layer(encoder_output)
+                h.append(h_i)
+                attns.append(attn_i)
+        else:
+            h = [layer(encoder_output) for layer in self.attns]
+
         if len(h) == 1:
             h = h[0]
         else:
@@ -414,8 +427,7 @@ class Multihead_Attn():
         if self.prelogvar_layer:
             h = self.prelogvar_layer(h)
         logvar = self.logvar_layer(h)
-
-        return mean, logvar
+        return mean, logvar, attns if self.return_att else mean, logvar
 
 
 class AvgLatent3():
@@ -1402,7 +1414,7 @@ class FiLM():
         zh = self.concat_predense(zh)
         gamma = self.gamma(zh)
         beta = self.beta(zh)
-        return Lambda(lambda x: x[0] * zh + x[1])([gamma, beta])
+        return Lambda(lambda x: x[0] * zh + x[1])([gamma, beta]), gamma, beta
 
 
 class DecoderLayerFiLM():
@@ -1415,9 +1427,9 @@ class DecoderLayerFiLM():
     def __call__(self, dec_input, enc_output, z_latent, self_mask=None, enc_mask=None):
         output, slf_attn = self.self_att_layer(dec_input, dec_input, dec_input, mask=self_mask)
         output, enc_attn = self.enc_att_layer(output, enc_output, enc_output, mask=enc_mask)
-        output = self.film_layer(output, z_latent)
+        output, gamma, beta = self.film_layer(output, z_latent)
         output = self.pos_ffn_layer(output)
-        return output, slf_attn, enc_attn
+        return output, slf_attn, enc_attn, [gamma, beta]
 
 class DecoderLayerNoFE():
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v, d_latent, dropout=0.1):
@@ -1457,12 +1469,15 @@ class DecoderLatent():
                  layers=6, dropout=0.1, word_emb=None, pos_emb=None):
         self.emb_layer = word_emb
         self.pos_layer = pos_emb
+
         if "FILM" in decoder:
             self.layers = [DecoderLayerFiLM(d_model, d_inner_hid, n_head, d_k, d_v, d_latent, dropout) for _ in
                        range(layers)]
+            self.use_encdec_mask = False
         else:
             self.layers = [DecoderLayerNoFE(d_model, d_inner_hid, n_head, d_k, d_v, d_latent, dropout) for _ in
                        range(layers)]
+            self.use_encdec_mask = True
 
     def __call__(self, tgt_seq, tgt_pos, src_seq, enc_output, z_latent, return_att=False, active_layers=999):
 
@@ -1476,17 +1491,27 @@ class DecoderLatent():
 
         # Don't want encoder mask as there should be no padding from latent dim
         #enc_mask = Lambda(lambda x: GetPadMask(x[0], x[1]), name='DecoderEncMask')([tgt_seq, src_seq])
-        enc_mask = self_mask
         if return_att: self_atts, enc_atts = [], []
-
+        gammas = []
+        betas = []
         for dec_layer in self.layers[:active_layers]:
-            x, self_att, enc_att = dec_layer(x, enc_output, z_latent, self_mask, enc_mask)
-
+            if self.use_encdec_mask:
+                x, self_att, enc_att = dec_layer(x, enc_output, z_latent, self_mask, self_mask)
+            else:
+                x, self_att, enc_att, gb_i = dec_layer(x, enc_output, z_latent, self_mask, None)
             if return_att:
+                if not self.use_encdec_mask:
+                    gammas.append(gb_i[0])
+                    betas.append(gb_i[1])
                 self_atts.append(self_att)
                 enc_atts.append(enc_att)
 
-        return (x, self_atts, enc_atts) if return_att else x
+        if self.use_encdec_mask:
+            return (x, self_atts, enc_atts) if return_att else x
+        else:
+            return (x, self_atts, enc_atts, gammas, betas) if return_att else x
+
+
 
 
 class LRSchedulerPerStep(Callback):

@@ -103,12 +103,15 @@ class TriTransformer:
 
         self.decode = None
         self.use_src_pos = False
+        self.return_bneck_attn = True
         if "gru" in self.p["bottleneck"]:
+            self.return_bneck_attn = False
             self.encoder = tr.GRUEncoder(layers=self.p["ID_layers"], d_gru=self.p["ID_d_model"],
                                          latent_dim=self.p["latent_dim"],
                                          attn=("attn" in self.p["bottleneck"]),
                                          word_emb=self.word_emb)
         elif "conv" in self.p["bottleneck"]:
+            self.return_bneck_attn = False
             self.encoder = tr.ConvEncoder(layers=self.p["ID_layers"],
                                           min_filt_size=self.p["ID_d_k"],
                                           min_filt_num=self.p["ID_d_k"],
@@ -119,7 +122,8 @@ class TriTransformer:
         else:
             self.use_src_pos = True
             self.encoder = TransformerEncoder(params=params, tokens=i_tokens,
-                                              pos_emb=pos_emb, word_emb=self.word_emb)
+                                              pos_emb=pos_emb, word_emb=self.word_emb,
+                                              return_att=self.return_bneck_attn)
 
         # KL Loss variable, weights the amount of variational loss, used by VAE annealing callback
         self.kl_loss_var = K.variable(0.0, dtype=np.float, name='kl_loss_weight') if self.p["stddev"] else None
@@ -141,19 +145,8 @@ class TriTransformer:
 
         self.sampler = Lambda(sampling)
 
-        # Use a default decoder configuration
-        # To standardise across different tests
-        # We are trying to assess the quality of the latent space
-        # TODO(Basil): Make this a command line parameter
-        use_default_decoder = False
-        if use_default_decoder:
-            self.p = DefaultDecoderParams()
-            dec_pos_emb = tr.Embedding(self.p["len_limit"], self.p["d_model"], trainable=False,
-                                       weights=[tr.GetPosEncodingMatrix(params["len_limit"], self.p["d_model"])])
-            dec_word_emb = tr.Embedding(self.o_tokens.num(), self.p["d_model"])
-        else:
-            dec_word_emb = self.word_emb
-            dec_pos_emb = pos_emb
+        dec_word_emb = self.word_emb
+        dec_pos_emb = pos_emb
 
         if "NoFE" in self.p["decoder"]:
             self.false_embedder = None
@@ -195,9 +188,14 @@ class TriTransformer:
         else:
             src_seq = Input(shape=(None,), dtype='int32', name='src_seq')
 
+        bneck_attn = None
         if self.use_src_pos:
             src_pos = Lambda(self.get_pos_seq)(src_seq)
-            z_mean, z_logvar, z_sampled, enc_attn = self.encoder(src_seq, src_pos)
+            print("Returning bneck attn!")
+            if self.return_bneck_attn:
+                z_mean, z_logvar, z_sampled, enc_attn, bneck_attn = self.encoder(src_seq, src_pos)
+            else:
+                z_mean, z_logvar, z_sampled, enc_attn = self.encoder(src_seq, src_pos)
         else:
             enc_attn = None
             z_mean, z_logvar, z_sampled = self.encoder(src_seq)
@@ -228,7 +226,11 @@ class TriTransformer:
                                                                  active_layers=active_layers, return_att=True)
             else:
                 # For FiLM or NoFE decoders, we require the latent vector
-                dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq, tgt_pos, l_vec, z_seq, l_vec,
+                if self.p["decoder"] == "TRANSFORMER_FILM":
+                    dec_output, dec_attn, encdec_attn, gamma, beta = self.decoder(tgt_seq, tgt_pos, l_vec, z_seq, l_vec,
+                                                                 active_layers=active_layers, return_att=True)
+                else:
+                    dec_output, dec_attn, encdec_attn = self.decoder(tgt_seq, tgt_pos, l_vec, z_seq, l_vec,
                                                                  active_layers=active_layers, return_att=True)
 
             dec_output = debugPrint(dec_output, "DEC_OUTPUT")
@@ -314,6 +316,14 @@ class TriTransformer:
         self.encode = Model(src_seq, [z_mean, z_logvar])
         self.encode_sample = Model(src_seq, [z_sampled])
         self.decode = Model([z_input, tgt_seq_in], final_output[0])
+        self.output_bneck_attn = None
+        if bneck_attn:
+            self.output_bneck_attn = Model([src_seq, tgt_seq_in], bneck_attn)
+        self.output_film = None
+        if self.p["decoder"] == "TRANSFORMER_FILM":
+            gamma.extend(beta)
+            self.output_film = Model([src_seq, tgt_seq_in],gamma)
+
 
     def _buildPropertyPredictor(self, x):
         h = Dense(100, input_shape=(self.p["latent_dim"],), activation='relu')(x)
@@ -325,7 +335,10 @@ class TriTransformer:
         self.encode_sample.compile('adam', 'mse')
         self.encode.compile('adam', 'mse')
         self.decode.compile('adam', 'mse')
-
+        if self.output_bneck_attn:
+            self.output_bneck_attn.compile('adam', 'mse')
+        if self.output_film:
+            self.output_film.compile('adam','mse')
         if N_GPUS != 1:
             self.autoencoder = multi_gpu_model(self.autoencoder, N_GPUS)
 
@@ -620,20 +633,23 @@ class TriTransformer:
 
 
 class TransformerEncoder():
-    def __init__(self, params, tokens, pos_emb, word_emb):
+    def __init__(self, params, tokens, pos_emb, word_emb, return_att):
         self.p = params
         self.encoder = tr.Encoder(params["d_model"], params["d_inner_hid"], params["heads"], params["d_k"],
                                   params["d_v"],
                                   params["layers"], params["dropout"], word_emb=word_emb, pos_emb=pos_emb)
 
         self.word_emb = word_emb
+        self.return_att = return_att
+        if return_att: print("Returning attention")
         if params["bottleneck"] == "attention":
             self.encoder_to_latent = tr.Multihead_Attn(params["d_model"], params["latent_dim"],
                                                        heads=params["AM_heads"],
                                                        attn_mechanism=params["AM_type"],
-                                                       use_softmax=params["AM_softmax"])
+                                                       use_softmax=params["AM_softmax"],return_attn=return_att)
             # self.encoder_to_latent = tr.latent_dict[params["bottleneck"]](params["d_model"], params["latent_dim"])
         elif "ar" in params["bottleneck"]:
+            self.return_att = False
             latent_pos_emb = tr.Embedding(params["latent_dim"], params["ID_d_model"], trainable=False)
             self.encoder_to_latent = tr.latent_dict[params["bottleneck"]](params["ID_d_model"],
                                                                           params["ID_d_inner_hid"],
@@ -646,8 +662,10 @@ class TransformerEncoder():
                                                                           pos_emb=latent_pos_emb,
                                                                           false_emb=None)
         elif params["bottleneck"] == "trans_gru":
+            self.return_att = False
             self.encoder_to_latent = GRU(params["latent_dim"], return_sequences=False)
         elif params["bottleneck"] == "none":
+            self.return_att = False
             self.encoder_to_latent = tr.Vec2Variational(params["d_model"], params["len_limit"])
 
     def __call__(self, src_seq, src_pos):
@@ -665,6 +683,11 @@ class TransformerEncoder():
             z_mean = Dense(self.p["latent_dim"])(h)
             z_logvar = Dense(self.p["latent_dim"])(h)
         else:
-            z_mean, z_logvar = self.encoder_to_latent(enc_output)
+            outs = self.encoder_to_latent(enc_output)
+            z_mean = outs[0]
+            z_logvar = outs[1]
+            if len(outs) == 4:
+                bneck_attn = outs[2]
+                return z_mean, z_logvar, z_s, enc_attn, bneck_attn
 
         return z_mean, z_logvar, z_s, enc_attn

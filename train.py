@@ -189,6 +189,7 @@ def trainTransformer(params, data_file=None, tokens=None, data_train=None, data_
     # Store number of params
     params["num_params"] = int(np.sum([K.count_params(p) for p in set(model.encode.trainable_weights)]))
     print("NUMBER OF PARAMETERS:", params["num_params"])
+
     # return 0,0
     # Set up callbacks
     # Learning rate scheduler

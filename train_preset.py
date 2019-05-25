@@ -65,9 +65,9 @@ def get_arguments():
                         help='Number of epochs to run during training.')
     parser.add_argument('--batch_size', type=int, metavar='N', default=40,
                         help='Number of samples to process per minibatch during training.')
-    parser.add_argument('--bottleneck', type=str, metavar='N', default="conv_attn",
+    parser.add_argument('--bottleneck', type=str, metavar='N', default="avg",
                         help='Choice of bottleneck')
-    parser.add_argument('--model_size', type=str, metavar='N', default="medium",
+    parser.add_argument('--model_size', type=str, metavar='N', default="small",
                         help='Number of samples to process per minibatch during training.')
     parser.add_argument('--latent_dim', type=int, metavar='N', default=96,
                         help='Latent dimension')
@@ -75,7 +75,7 @@ def get_arguments():
                         help="Choice to use Normal IMQ WAE with s = 2, weight = 10")
     parser.add_argument('--decoder', type=str, metavar='N', default = "TRANSFORMER",
                         help="Can use either standard transformer, FILM or NoFE")
-    parser.add_argument('--use_FILM', type=bool, metavar='N', default=False,
+    parser.add_argument('--use_FILM', type=bool, metavar='N', default=True,
                         help="Choice to use FILM layers in decoder")
     parser.add_argument('--no_FE', type=bool, metavar='N', default=False,
                         help="Use decoder without false embeddings")
@@ -263,7 +263,15 @@ def main():
             params["heads"] = 12
             params["layers"] = 4
 
-            if "ar" in params["bottleneck"]:
+            if params["bottleneck"] == "ar2":
+                params["ID_layers"] = 3
+                params["ID_d_model"] = 24
+                params["ID_width"] = 12
+                params["ID_d_inner_hid"] = 256
+                params["ID_d_k"] = 7
+                params["ID_d_v"] = 7
+                params["ID_heads"] = 6
+            elif "ar" in params["bottleneck"]:
                 params["ID_layers"] = 3
                 params["ID_d_model"] = 40
                 params["ID_width"] = 4
